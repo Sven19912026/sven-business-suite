@@ -283,7 +283,7 @@ function initialsFor(user) {
     .join('') || 'SB'
 }
 
-function displayNameFor(user) {
+function displayNameFor() {
   return 'Sven'
 }
 
