@@ -10,6 +10,7 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  Divider,
   Grid,
   IconButton,
   InputAdornment,
@@ -33,6 +34,7 @@ import {
 } from "@mui/material";
 
 import AddIcon from "@mui/icons-material/Add";
+import AddCircleOutlineIcon from "@mui/icons-material/AddCircleOutlined";
 import DeleteIcon from "@mui/icons-material/Delete";
 import EditIcon from "@mui/icons-material/Edit";
 import SearchIcon from "@mui/icons-material/Search";
@@ -41,9 +43,11 @@ import EmojiEventsIcon from "@mui/icons-material/EmojiEvents";
 import SavingsIcon from "@mui/icons-material/Savings";
 import EventNoteIcon from "@mui/icons-material/EventNote";
 import BusinessIcon from "@mui/icons-material/Business";
+import CalculateIcon from "@mui/icons-material/Calculate";
 import PersonIcon from "@mui/icons-material/Person";
 import PhoneIcon from "@mui/icons-material/Phone";
 import EmailIcon from "@mui/icons-material/Email";
+import RemoveCircleOutlineIcon from "@mui/icons-material/RemoveCircleOutlined";
 
 import {
   addDoc,
@@ -130,6 +134,40 @@ function einsparung(eintrag) {
   );
 }
 
+function prozentFormat(wert) {
+  const zahl = Number(wert);
+  const sicher = Number.isFinite(zahl) ? zahl : 0;
+  return `${new Intl.NumberFormat("de-DE", {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 2,
+  }).format(sicher)} %`;
+}
+
+function einsparungProzent(eintrag) {
+  const ausgang = euroWert(eintrag.ausgangsangebot);
+  if (ausgang <= 0) return 0;
+  return (einsparung(eintrag) / ausgang) * 100;
+}
+
+function preisvergleich(ausgangswert, zielwert) {
+  const ausgang = euroWert(ausgangswert);
+  const ziel = euroWert(zielwert);
+  const differenz = ausgang - ziel;
+  const prozent = ausgang > 0 ? (differenz / ausgang) * 100 : 0;
+  return { ausgang, ziel, differenz, prozent };
+}
+
+let vergleichszeilenZaehler = 0;
+
+function neueVergleichszeile(bezeichnung = "Zielpreis", wert = "") {
+  vergleichszeilenZaehler += 1;
+  return {
+    id: `vergleich-${Date.now()}-${vergleichszeilenZaehler}`,
+    bezeichnung,
+    wert: wert === null || wert === undefined ? "" : String(wert),
+  };
+}
+
 export default function Verhandlungen() {
   const theme = useTheme();
   const istMobil = useMediaQuery(theme.breakpoints.down("md"));
@@ -166,6 +204,14 @@ export default function Verhandlungen() {
 
   const [fehler, setFehler] = useState("");
   const [speichert, setSpeichert] = useState(false);
+
+  const [rechnerOffen, setRechnerOffen] = useState(false);
+  const [rechnerAusgang, setRechnerAusgang] = useState("");
+  const [rechnerVergleiche, setRechnerVergleiche] = useState([
+    neueVergleichszeile("Zielpreis 1"),
+    neueVergleichszeile("Zielpreis 2"),
+  ]);
+  const [rechnerKontext, setRechnerKontext] = useState("frei");
 
   useEffect(() => {
     const benutzer = auth.currentUser;
@@ -241,6 +287,14 @@ export default function Verhandlungen() {
       0
     );
 
+    const ausgangsVolumen = verhandlungen.reduce((summe, eintrag) => {
+      const ausgang = euroWert(eintrag.ausgangsangebot);
+      return summe + (ausgang > 0 ? ausgang : 0);
+    }, 0);
+
+    const gesamtEinsparungProzent =
+      ausgangsVolumen > 0 ? (gesamtEinsparung / ausgangsVolumen) * 100 : 0;
+
     const faellig = verhandlungen.filter(
       (eintrag) =>
         eintrag.wiedervorlage &&
@@ -249,7 +303,14 @@ export default function Verhandlungen() {
         eintrag.status !== "Verloren"
     ).length;
 
-    return { offen, gewonnen, gesamtEinsparung, faellig };
+    return {
+      offen,
+      gewonnen,
+      gesamtEinsparung,
+      gesamtEinsparungProzent,
+      ausgangsVolumen,
+      faellig,
+    };
   }, [verhandlungen]);
 
   const gefilterteVerhandlungen = useMemo(() => {
@@ -561,6 +622,82 @@ export default function Verhandlungen() {
     }
   }
 
+  function rechnerOeffnen({ ausgang = "", vergleiche = [], kontext = "frei" } = {}) {
+    const vorbereiteteVergleiche = vergleiche
+      .filter((eintrag) => eintrag.wert !== null && eintrag.wert !== undefined)
+      .map((eintrag) =>
+        neueVergleichszeile(eintrag.bezeichnung || "Zielpreis", eintrag.wert)
+      );
+
+    setRechnerAusgang(ausgang === null || ausgang === undefined ? "" : String(ausgang));
+    setRechnerVergleiche(
+      vorbereiteteVergleiche.length
+        ? vorbereiteteVergleiche
+        : [neueVergleichszeile("Zielpreis 1"), neueVergleichszeile("Zielpreis 2")]
+    );
+    setRechnerKontext(kontext);
+    setRechnerOffen(true);
+  }
+
+  function freierRechnerOeffnen() {
+    rechnerOeffnen();
+  }
+
+  function formularRechnerOeffnen() {
+    const kandidaten = [
+      { bezeichnung: "Aktuelles Angebot", wert: verhandlungsFormular.aktuellesAngebot },
+      { bezeichnung: "Zielpreis", wert: verhandlungsFormular.zielpreis },
+      { bezeichnung: "Schmerzgrenze", wert: verhandlungsFormular.schmerzgrenze },
+    ].filter((eintrag) => String(eintrag.wert ?? "").trim() !== "");
+
+    rechnerOeffnen({
+      ausgang: verhandlungsFormular.ausgangsangebot,
+      vergleiche: kandidaten,
+      kontext: "formular",
+    });
+  }
+
+  function eintragRechnerOeffnen(eintrag) {
+    rechnerOeffnen({
+      ausgang: eintrag.ausgangsangebot,
+      vergleiche: [
+        { bezeichnung: "Aktuelles Angebot", wert: eintrag.aktuellesAngebot },
+        { bezeichnung: "Zielpreis", wert: eintrag.zielpreis },
+        { bezeichnung: "Schmerzgrenze", wert: eintrag.schmerzgrenze },
+      ].filter((vergleich) => String(vergleich.wert ?? "").trim() !== ""),
+      kontext: "eintrag",
+    });
+  }
+
+  function vergleichHinzufuegen() {
+    setRechnerVergleiche((aktuell) => [
+      ...aktuell,
+      neueVergleichszeile(`Zielpreis ${aktuell.length + 1}`),
+    ]);
+  }
+
+  function vergleichAendern(id, feld, wert) {
+    setRechnerVergleiche((aktuell) =>
+      aktuell.map((eintrag) =>
+        eintrag.id === id ? { ...eintrag, [feld]: wert } : eintrag
+      )
+    );
+  }
+
+  function vergleichLoeschen(id) {
+    setRechnerVergleiche((aktuell) => {
+      const naechsterStand = aktuell.filter((eintrag) => eintrag.id !== id);
+      return naechsterStand.length
+        ? naechsterStand
+        : [neueVergleichszeile("Zielpreis 1")];
+    });
+  }
+
+  function vergleichAlsZielpreisUebernehmen(wert) {
+    setVerhandlungsFormular((aktuell) => ({ ...aktuell, zielpreis: wert }));
+    setRechnerOffen(false);
+  }
+
   function prioritaetsFarbe(prioritaet) {
     if (prioritaet === "Hoch") return "error";
     if (prioritaet === "Mittel") return "warning";
@@ -588,6 +725,7 @@ export default function Verhandlungen() {
     {
       titel: "Gesamte Einsparung",
       wert: euroFormat(kennzahlen.gesamtEinsparung),
+      zusatz: `${prozentFormat(kennzahlen.gesamtEinsparungProzent)} vom Ausgangsvolumen`,
       icon: <SavingsIcon fontSize="large" />,
     },
     {
@@ -615,25 +753,36 @@ export default function Verhandlungen() {
           </Typography>
         </Box>
 
-        <Button
-          variant="contained"
-          startIcon={<AddIcon />}
-          onClick={
-            ansicht === "verhandlungen"
-              ? neueVerhandlungOeffnen
-              : neuerLieferantOeffnen
-          }
-          sx={{
-            minHeight: 48,
-            px: 3,
-            whiteSpace: "nowrap",
-            alignSelf: { xs: "stretch", md: "center" },
-          }}
+        <Stack
+          direction={{ xs: "column", sm: "row" }}
+          spacing={1}
+          alignSelf={{ xs: "stretch", md: "center" }}
         >
-          {ansicht === "verhandlungen"
-            ? "Neue Verhandlung"
-            : "Neuer Lieferant"}
-        </Button>
+          {ansicht === "verhandlungen" && (
+            <Button
+              variant="outlined"
+              startIcon={<CalculateIcon />}
+              onClick={freierRechnerOeffnen}
+              sx={{ minHeight: 48, px: 2.5, whiteSpace: "nowrap" }}
+            >
+              Ersparnis-Rechner
+            </Button>
+          )}
+          <Button
+            variant="contained"
+            startIcon={<AddIcon />}
+            onClick={
+              ansicht === "verhandlungen"
+                ? neueVerhandlungOeffnen
+                : neuerLieferantOeffnen
+            }
+            sx={{ minHeight: 48, px: 3, whiteSpace: "nowrap" }}
+          >
+            {ansicht === "verhandlungen"
+              ? "Neue Verhandlung"
+              : "Neuer Lieferant"}
+          </Button>
+        </Stack>
       </Stack>
 
       <Paper sx={{ mb: 3 }}>
@@ -678,6 +827,11 @@ export default function Verhandlungen() {
                         <Typography variant="h4" fontWeight={800} mt={1}>
                           {karte.wert}
                         </Typography>
+                        {karte.zusatz && (
+                          <Typography variant="body2" color="success.main" fontWeight={700} mt={0.5}>
+                            {karte.zusatz}
+                          </Typography>
+                        )}
                       </Box>
                       <Box color="primary.main">{karte.icon}</Box>
                     </Stack>
@@ -771,6 +925,11 @@ export default function Verhandlungen() {
                         </Typography>
                       </Box>
                       <Box sx={{ whiteSpace: "nowrap" }}>
+                        <Tooltip title="Ersparnis berechnen">
+                          <IconButton onClick={() => eintragRechnerOeffnen(eintrag)}>
+                            <CalculateIcon />
+                          </IconButton>
+                        </Tooltip>
                         <IconButton
                           onClick={() => verhandlungBearbeitenOeffnen(eintrag)}
                         >
@@ -832,6 +991,9 @@ export default function Verhandlungen() {
                         </Typography>
                         <Typography fontWeight={800} color="success.main">
                           {euroFormat(einsparung(eintrag))}
+                        </Typography>
+                        <Typography variant="caption" color="success.main" fontWeight={700}>
+                          {prozentFormat(einsparungProzent(eintrag))}
                         </Typography>
                       </Grid>
                       <Grid size={{ xs: 6 }}>
@@ -911,11 +1073,19 @@ export default function Verhandlungen() {
                         <Typography fontWeight={800} color="success.main">
                           {euroFormat(einsparung(eintrag))}
                         </Typography>
+                        <Typography variant="caption" color="success.main" fontWeight={700}>
+                          {prozentFormat(einsparungProzent(eintrag))}
+                        </Typography>
                       </TableCell>
                       <TableCell>
                         {datumFormat(eintrag.wiedervorlage)}
                       </TableCell>
                       <TableCell align="right">
+                        <Tooltip title="Ersparnis berechnen">
+                          <IconButton onClick={() => eintragRechnerOeffnen(eintrag)}>
+                            <CalculateIcon />
+                          </IconButton>
+                        </Tooltip>
                         <Tooltip title="Bearbeiten">
                           <IconButton
                             onClick={() =>
@@ -1438,6 +1608,16 @@ export default function Verhandlungen() {
                 onChange={verhandlungsFeldAendern}
               />
             </Grid>
+            <Grid size={{ xs: 12 }}>
+              <Button
+                variant="outlined"
+                startIcon={<CalculateIcon />}
+                onClick={formularRechnerOeffnen}
+                disabled={!euroWert(verhandlungsFormular.ausgangsangebot)}
+              >
+                Ersparnis in Prozent berechnen und Zielpreise vergleichen
+              </Button>
+            </Grid>
             <Grid size={{ xs: 12, md: 6 }}>
               <TextField
                 fullWidth
@@ -1473,6 +1653,121 @@ export default function Verhandlungen() {
           >
             {speichert ? "Speichert..." : "Speichern"}
           </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={rechnerOffen}
+        onClose={() => setRechnerOffen(false)}
+        fullWidth
+        maxWidth="md"
+      >
+        <DialogTitle>Ersparnis- und Zielpreisrechner</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2.5} mt={0.5}>
+            <Alert severity="info">
+              Formel: (Ausgangspreis − Vergleichspreis) ÷ Ausgangspreis × 100.
+              Der Rechner speichert keine Daten in Firebase.
+            </Alert>
+
+            <TextField
+              fullWidth
+              label="Ausgangspreis"
+              type="number"
+              inputProps={{ min: 0, step: "0.01" }}
+              value={rechnerAusgang}
+              onChange={(event) => setRechnerAusgang(event.target.value)}
+              helperText="Das ursprüngliche Angebot oder der Listenpreis."
+              autoFocus
+            />
+
+            {euroWert(rechnerAusgang) <= 0 && (
+              <Alert severity="warning">Bitte zuerst einen Ausgangspreis größer als 0 eintragen.</Alert>
+            )}
+
+            <Stack spacing={1.5}>
+              {rechnerVergleiche.map((vergleich, index) => {
+                const ergebnis = preisvergleich(rechnerAusgang, vergleich.wert);
+                const positiv = ergebnis.differenz >= 0;
+                return (
+                  <Paper key={vergleich.id} variant="outlined" sx={{ p: 2 }}>
+                    <Grid container spacing={2} alignItems="center">
+                      <Grid size={{ xs: 12, sm: 4 }}>
+                        <TextField
+                          fullWidth
+                          label={`Bezeichnung ${index + 1}`}
+                          value={vergleich.bezeichnung}
+                          onChange={(event) =>
+                            vergleichAendern(vergleich.id, "bezeichnung", event.target.value)
+                          }
+                        />
+                      </Grid>
+                      <Grid size={{ xs: 12, sm: 3 }}>
+                        <TextField
+                          fullWidth
+                          label="Preis / Zielpreis"
+                          type="number"
+                          inputProps={{ min: 0, step: "0.01" }}
+                          value={vergleich.wert}
+                          onChange={(event) =>
+                            vergleichAendern(vergleich.id, "wert", event.target.value)
+                          }
+                        />
+                      </Grid>
+                      <Grid size={{ xs: 10, sm: 4 }}>
+                        <Stack spacing={0.25}>
+                          <Typography variant="caption" color="text.secondary">
+                            {positiv ? "Ersparnis" : "Mehrkosten"}
+                          </Typography>
+                          <Typography fontWeight={900} color={positiv ? "success.main" : "error.main"}>
+                            {euroFormat(Math.abs(ergebnis.differenz))}
+                          </Typography>
+                          <Typography variant="body2" fontWeight={800} color={positiv ? "success.main" : "error.main"}>
+                            {positiv ? "−" : "+"}{prozentFormat(Math.abs(ergebnis.prozent))}
+                          </Typography>
+                        </Stack>
+                      </Grid>
+                      <Grid size={{ xs: 2, sm: 1 }}>
+                        <Tooltip title="Vergleich entfernen">
+                          <IconButton color="error" onClick={() => vergleichLoeschen(vergleich.id)}>
+                            <RemoveCircleOutlineIcon />
+                          </IconButton>
+                        </Tooltip>
+                      </Grid>
+                      {rechnerKontext === "formular" && euroWert(vergleich.wert) > 0 && (
+                        <Grid size={{ xs: 12 }}>
+                          <Button
+                            size="small"
+                            onClick={() => vergleichAlsZielpreisUebernehmen(vergleich.wert)}
+                          >
+                            Diesen Wert als Zielpreis übernehmen
+                          </Button>
+                        </Grid>
+                      )}
+                    </Grid>
+                  </Paper>
+                );
+              })}
+            </Stack>
+
+            <Button
+              variant="outlined"
+              startIcon={<AddCircleOutlineIcon />}
+              onClick={vergleichHinzufuegen}
+              sx={{ alignSelf: "flex-start" }}
+            >
+              Weiteren Zielpreis vergleichen
+            </Button>
+
+            <Divider />
+            <Typography variant="body2" color="text.secondary">
+              Positive Werte zeigen die Ersparnis. Liegt ein Vergleichspreis über dem Ausgangspreis,
+              werden die Mehrkosten rot dargestellt.
+            </Typography>
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setRechnerOffen(false)}>Schließen</Button>
         </DialogActions>
       </Dialog>
 

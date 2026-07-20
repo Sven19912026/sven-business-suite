@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Box,
@@ -7,17 +7,22 @@ import {
   CardContent,
   Checkbox,
   Chip,
+  CircularProgress,
+  Collapse,
   Dialog,
   DialogActions,
   DialogContent,
   DialogTitle,
   Divider,
+  FormControlLabel,
   Grid,
   IconButton,
   InputAdornment,
+  LinearProgress,
   MenuItem,
   Paper,
   Stack,
+  Switch,
   Tab,
   Tabs,
   TextField,
@@ -27,14 +32,20 @@ import {
   useTheme,
 } from "@mui/material";
 import AddIcon from "@mui/icons-material/Add";
+import AutoFixHighIcon from "@mui/icons-material/AutoFixHigh";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import BusinessIcon from "@mui/icons-material/Business";
+import CloudUploadIcon from "@mui/icons-material/CloudUpload";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import DeleteIcon from "@mui/icons-material/Delete";
 import EditIcon from "@mui/icons-material/Edit";
 import EventIcon from "@mui/icons-material/Event";
+import ExpandLessIcon from "@mui/icons-material/ExpandLess";
+import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import HistoryIcon from "@mui/icons-material/History";
+import ImageSearchIcon from "@mui/icons-material/ImageSearch";
 import PersonIcon from "@mui/icons-material/Person";
+import PictureAsPdfIcon from "@mui/icons-material/PictureAsPdf";
 import SearchIcon from "@mui/icons-material/Search";
 import TaskAltIcon from "@mui/icons-material/TaskAlt";
 import {
@@ -48,7 +59,11 @@ import {
   updateDoc,
   where,
 } from "firebase/firestore";
+import { GlobalWorkerOptions, getDocument } from "pdfjs-dist";
+import pdfWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { auth, db } from "../firebase";
+
+GlobalWorkerOptions.workerSrc = pdfWorker;
 
 const leerLieferant = {
   firma: "",
@@ -86,6 +101,312 @@ const leerAufgabe = {
   status: "Offen",
   notizen: "",
 };
+
+
+const NEUER_LIEFERANT = "__neu__";
+const MAX_DATEIGROESSE = 20 * 1024 * 1024;
+const MAX_PDF_SEITEN = 80;
+const MAX_OCR_PDF_SEITEN = 5;
+const MIN_PDF_TEXTLAENGE = 120;
+
+function textNormalisieren(value) {
+  return String(value || "")
+    .replace(/\u00a0/g, " ")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n[ \t]+/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function zeilenAusText(text) {
+  return text
+    .split(/\r?\n/)
+    .map((zeile) => zeile.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+}
+
+function ersterTreffer(text, muster) {
+  for (const regex of muster) {
+    const treffer = text.match(regex);
+    const wert = treffer?.[1]?.trim();
+    if (wert) return wert.replace(/[|;]+$/, "").trim();
+  }
+  return "";
+}
+
+function dateinameBereinigen(name) {
+  return String(name || "")
+    .replace(/\.(pdf|png|jpe?g|webp)$/i, "")
+    .replace(/\b(scan|screenshot|bild|image|dokument|rechnung|angebot|vertrag|brief)\b/gi, " ")
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function firmaBereinigen(value) {
+  return String(value || "")
+    .replace(/^(?:firma|lieferant|anbieter|auftragnehmer|verkäufer|rechnungssteller|vertragspartner)\s*[:–—-]?\s*/i, "")
+    .replace(/\s{2,}/g, " ")
+    .replace(/[|,;]+$/, "")
+    .trim();
+}
+
+function firmaErkennen(text, dateiname) {
+  const beschriftet = ersterTreffer(text, [
+    /(?:Firma|Lieferant|Anbieter|Auftragnehmer|Verkäufer|Rechnungssteller|Vertragspartner|Aussteller)\s*[:–—-]\s*([^\n]{2,120})/i,
+    /(?:von|durch)\s+([^\n]{2,100}?(?:GmbH(?:\s*&\s*Co\.?\s*KG)?|AG|KG|OHG|UG(?:\s*\(haftungsbeschränkt\))?|GbR|e\.?\s*K\.?|SE))\b/i,
+  ]);
+  if (beschriftet) return firmaBereinigen(beschriftet);
+
+  const ausschluss = /bank|sparkasse|iban|bic|ust-id|steuer|amtsgericht|geschäftsführer|rechnungsempfänger|kunde/i;
+  const rechtsform = /\b(?:GmbH(?:\s*&\s*Co\.?\s*KG)?|AG|KG|OHG|UG(?:\s*\(haftungsbeschränkt\))?|GbR|e\.?\s*K\.?|SE)\b/i;
+  const zeile = zeilenAusText(text).find((eintrag) => (
+    eintrag.length >= 3
+    && eintrag.length <= 130
+    && rechtsform.test(eintrag)
+    && !ausschluss.test(eintrag)
+  ));
+  if (zeile) return firmaBereinigen(zeile);
+
+  const ausDatei = dateinameBereinigen(dateiname);
+  return ausDatei.length >= 3 && ausDatei.length <= 100 ? ausDatei : "";
+}
+
+function adresseErkennen(text) {
+  const zeilen = zeilenAusText(text);
+  const strassenMuster = /\b(?:straße|strasse|str\.|weg|allee|platz|ring|gasse|chaussee|damm|ufer|markt|promenade|steig|pfad)\s*\d+[a-zA-Z]?\b/i;
+  const strasse = zeilen.find((zeile) => strassenMuster.test(zeile)) || "";
+
+  const plzOrtTreffer = text.match(/\b(\d{5})\s+([A-ZÄÖÜ][A-Za-zÄÖÜäöüß .\-/]{2,60})/);
+  const ort = plzOrtTreffer?.[2]
+    ?.replace(/\s{2,}.*/, "")
+    .replace(/[|,;]+$/, "")
+    .trim() || "";
+
+  return {
+    strasse: strasse.replace(/^.*?[:–—-]\s*/, "").trim(),
+    plz: plzOrtTreffer?.[1] || "",
+    ort,
+  };
+}
+
+function kategorieErkennen(text) {
+  const klein = text.toLowerCase();
+  if (/bagger|radlader|kran|maschine|maschinenbau|baumaschine/.test(klein)) return "Maschine";
+  if (/fahrzeug|autohaus|kfz|lkw|pkw|transporter|fuhrpark/.test(klein)) return "Fahrzeug";
+  if (/personal|zeitarbeit|arbeitnehmerüberlassung|recruiting/.test(klein)) return "Personal";
+  if (/dienstleistung|beratung|service|wartung|software|versicherung|miete|leasing/.test(klein)) return "Dienstleistung";
+  if (/material|baustoff|stahl|beton|holz|elektro|werkzeug|lieferung|waren/.test(klein)) return "Material";
+  return "Sonstiges";
+}
+
+function kontaktErkennen(text) {
+  const alleEmails = [...new Set(text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) || [])];
+  const name = ersterTreffer(text, [
+    /(?:Ihr\s+Ansprechpartner|Ansprechpartner(?:in)?|Kontaktperson|Kontakt|Sachbearbeiter(?:in)?|Bearbeiter(?:in)?)\s*[:–—-]\s*(?:Herrn?|Frau)?\s*([^\n,;|]{3,80})/i,
+    /(?:Herr|Frau)\s+([A-ZÄÖÜ][A-Za-zÄÖÜäöüß'-]+(?:\s+[A-ZÄÖÜ][A-Za-zÄÖÜäöüß'-]+){1,3})/,
+  ]);
+  const position = ersterTreffer(text, [
+    /(?:Position|Funktion|Abteilung)\s*[:–—-]\s*([^\n,;|]{2,80})/i,
+  ]);
+  const mobil = ersterTreffer(text, [
+    /(?:Mobil|Handy|Mobile)\s*[:–—-]?\s*((?:\+49|0)[\d\s()\-/]{7,25})/i,
+  ]);
+  const telefon = ersterTreffer(text, [
+    /(?:Telefon|Tel\.?|Durchwahl)\s*[:–—-]?\s*((?:\+49|0)[\d\s()\-/]{7,25})/i,
+  ]);
+  const kontaktEmail = ersterTreffer(text, [
+    /(?:E-?Mail\s+(?:Ansprechpartner|Kontakt)|persönliche\s+E-?Mail)\s*[:–—-]?\s*([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})/i,
+  ]) || alleEmails[1] || "";
+
+  return {
+    name: name.replace(/\s{2,}/g, " ").trim(),
+    position,
+    telefon,
+    mobil,
+    email: kontaktEmail,
+    geburtstag: "",
+    notizen: "",
+  };
+}
+
+function lieferantAusText(text, dateiname) {
+  const normalisiert = textNormalisieren(text);
+  const adresse = adresseErkennen(normalisiert);
+  const kontakt = kontaktErkennen(normalisiert);
+  const emails = [...new Set(normalisiert.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) || [])];
+
+  const website = ersterTreffer(normalisiert, [
+    /(?:Website|Web|Internet)\s*[:–—-]?\s*((?:https?:\/\/|www\.)[^\s,;]+)/i,
+    /\b((?:https?:\/\/|www\.)[A-Z0-9.-]+\.[A-Z]{2,}(?:\/[^\s]*)?)/i,
+  ]);
+  const telefon = ersterTreffer(normalisiert, [
+    /(?:Telefon|Tel\.?|Zentrale)\s*[:–—-]?\s*((?:\+49|0)[\d\s()\-/]{7,25})/i,
+  ]);
+  const kundennummer = ersterTreffer(normalisiert, [
+    /(?:Kunden(?:nummer|nr\.?|konto)|Kd\.?-?Nr\.?|Debitoren(?:nummer|nr\.?))\s*[:#–—-]?\s*([A-Z0-9._\-/]{2,40})/i,
+  ]);
+  const zahlungsziel = ersterTreffer(normalisiert, [
+    /(?:Zahlungsziel|Zahlungsbedingungen?)\s*[:–—-]\s*([^\n]{3,120})/i,
+    /((?:zahlbar|fällig)\s+(?:innerhalb\s+)?\d+\s+Tage[^\n]{0,80})/i,
+    /((?:\d+\s+Tage\s+netto)[^\n]{0,60})/i,
+  ]);
+  const skonto = ersterTreffer(normalisiert, [
+    /(?:Skonto)\s*[:–—-]?\s*([^\n]{2,100})/i,
+    /(\d+(?:[,.]\d+)?\s*%\s*Skonto[^\n]{0,80})/i,
+  ]);
+  const standardrabatt = ersterTreffer(normalisiert, [
+    /(?:Standardrabatt|Grundrabatt|Rabatt)\s*[:–—-]?\s*(\d+(?:[,.]\d+)?\s*%[^\n]{0,60})/i,
+  ]);
+  const bonusvereinbarung = ersterTreffer(normalisiert, [
+    /(?:Bonusvereinbarung|Jahresbonus|Umsatzbonus|Bonus)\s*[:–—-]?\s*([^\n]{2,120})/i,
+  ]);
+  const lieferbedingungen = ersterTreffer(normalisiert, [
+    /(?:Lieferbedingungen|Lieferkonditionen|Incoterms?)\s*[:–—-]?\s*([^\n]{2,120})/i,
+    /\b((?:frei\s+Haus|ab\s+Werk|EXW|FCA|CPT|CIP|DAP|DPU|DDP|FOB|CFR|CIF)[^\n]{0,80})/i,
+  ]);
+
+  const firma = firmaErkennen(normalisiert, dateiname);
+  const warnungen = [];
+  if (!firma) warnungen.push("Firmenname wurde nicht sicher erkannt.");
+  if (!adresse.plz && !adresse.ort) warnungen.push("Ort und PLZ wurden nicht sicher erkannt.");
+  if (!emails.length && !telefon) warnungen.push("Keine allgemeinen Kontaktdaten sicher erkannt.");
+
+  return {
+    lieferant: {
+      ...leerLieferant,
+      firma,
+      kategorie: kategorieErkennen(normalisiert),
+      kundennummer,
+      strasse: adresse.strasse,
+      plz: adresse.plz,
+      ort: adresse.ort,
+      website,
+      telefon: telefon || kontakt.telefon,
+      email: emails[0] || "",
+      zahlungsziel,
+      skonto,
+      lieferbedingungen,
+      standardrabatt,
+      bonusvereinbarung,
+      notizen: "",
+    },
+    kontakt,
+    warnungen,
+  };
+}
+
+function firmaNormalisieren(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/&/g, "und")
+    .replace(/\b(gmbh|ag|kg|ohg|ug|haftungsbeschränkt|gbr|se|e\.?\s*k\.?)\b/g, "")
+    .replace(/[^a-z0-9äöüß]/g, "")
+    .trim();
+}
+
+function passendenLieferantenFinden(lieferanten, firma) {
+  const gesucht = firmaNormalisieren(firma);
+  if (!gesucht) return null;
+  return lieferanten.find((item) => firmaNormalisieren(item.firma) === gesucht)
+    || lieferanten.find((item) => {
+      const vergleich = firmaNormalisieren(item.firma);
+      return vergleich.length >= 5 && (vergleich.includes(gesucht) || gesucht.includes(vergleich));
+    })
+    || null;
+}
+
+function canvasAlsBlob(canvas) {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) resolve(blob);
+      else reject(new Error("Die Bildseite konnte nicht für OCR vorbereitet werden."));
+    }, "image/png");
+  });
+}
+
+function ocrStatusDeutsch(status) {
+  const texte = {
+    "loading tesseract core": "OCR-Modul wird geladen",
+    "initializing tesseract": "OCR wird initialisiert",
+    "loading language traineddata": "Deutsche Spracherkennung wird geladen",
+    "initializing api": "Texterkennung wird vorbereitet",
+    "recognizing text": "Text wird erkannt",
+  };
+  return texte[status] || "Dokument wird analysiert";
+}
+
+async function ocrWorkerErstellen(fortschritt) {
+  const { createWorker } = await import("tesseract.js");
+  return createWorker("deu+eng", undefined, {
+    logger: (meldung) => fortschritt?.(meldung),
+  });
+}
+
+async function bildTextAuslesen(datei, statusSetzen, prozentSetzen) {
+  const worker = await ocrWorkerErstellen((meldung) => {
+    statusSetzen(ocrStatusDeutsch(meldung.status));
+    if (Number.isFinite(meldung.progress)) prozentSetzen(Math.round(meldung.progress * 100));
+  });
+  try {
+    const ergebnis = await worker.recognize(datei);
+    return textNormalisieren(ergebnis.data.text);
+  } finally {
+    await worker.terminate();
+  }
+}
+
+async function pdfTextAuslesen(datei, statusSetzen, prozentSetzen) {
+  const ladevorgang = getDocument({ data: new Uint8Array(await datei.arrayBuffer()) });
+  const pdf = await ladevorgang.promise;
+  try {
+    if (pdf.numPages > MAX_PDF_SEITEN) {
+      throw new Error(`Das PDF hat ${pdf.numPages} Seiten. Erlaubt sind maximal ${MAX_PDF_SEITEN} Seiten.`);
+    }
+
+    const teile = [];
+    statusSetzen("PDF-Text wird lokal ausgelesen");
+    for (let seitenNummer = 1; seitenNummer <= pdf.numPages; seitenNummer += 1) {
+      const seite = await pdf.getPage(seitenNummer);
+      const inhalt = await seite.getTextContent();
+      teile.push(inhalt.items.map((item) => item.str).join(" "));
+      prozentSetzen(Math.round((seitenNummer / pdf.numPages) * 55));
+    }
+
+    const nativerText = textNormalisieren(teile.join("\n"));
+    if (nativerText.length >= MIN_PDF_TEXTLAENGE) return nativerText;
+
+    statusSetzen("Scan-PDF erkannt – OCR wird vorbereitet");
+    const seitenAnzahl = Math.min(pdf.numPages, MAX_OCR_PDF_SEITEN);
+    const worker = await ocrWorkerErstellen((meldung) => {
+      statusSetzen(ocrStatusDeutsch(meldung.status));
+    });
+    try {
+      const ocrTeile = [];
+      for (let seitenNummer = 1; seitenNummer <= seitenAnzahl; seitenNummer += 1) {
+        statusSetzen(`OCR: Seite ${seitenNummer} von ${seitenAnzahl}`);
+        const seite = await pdf.getPage(seitenNummer);
+        const viewport = seite.getViewport({ scale: 1.7 });
+        const canvas = document.createElement("canvas");
+        const context = canvas.getContext("2d", { willReadFrequently: true });
+        canvas.width = Math.ceil(viewport.width);
+        canvas.height = Math.ceil(viewport.height);
+        await seite.render({ canvasContext: context, viewport }).promise;
+        const blob = await canvasAlsBlob(canvas);
+        const ergebnis = await worker.recognize(blob);
+        ocrTeile.push(ergebnis.data.text);
+        canvas.width = 1;
+        canvas.height = 1;
+        prozentSetzen(55 + Math.round((seitenNummer / seitenAnzahl) * 45));
+      }
+      return textNormalisieren(ocrTeile.join("\n"));
+    } finally {
+      await worker.terminate();
+    }
+  } finally {
+    await pdf.destroy();
+  }
+}
 
 function formatDatum(value) {
   if (!value) return "—";
@@ -145,6 +466,22 @@ export default function CRM() {
   const [aufgabeDialog, setAufgabeDialog] = useState(false);
   const [aufgabeForm, setAufgabeForm] = useState(leerAufgabe);
   const [aufgabeId, setAufgabeId] = useState(null);
+
+
+  const [meldung, setMeldung] = useState("");
+  const [importDialog, setImportDialog] = useState(false);
+  const [importLaedt, setImportLaedt] = useState(false);
+  const [importFortschritt, setImportFortschritt] = useState(0);
+  const [importStatus, setImportStatus] = useState("");
+  const [importFehler, setImportFehler] = useState("");
+  const [importDateiname, setImportDateiname] = useState("");
+  const [importText, setImportText] = useState("");
+  const [importRohtextOffen, setImportRohtextOffen] = useState(false);
+  const [importWarnungen, setImportWarnungen] = useState([]);
+  const [importLieferant, setImportLieferant] = useState(leerLieferant);
+  const [importKontakt, setImportKontakt] = useState(leerKontakt);
+  const [importZiel, setImportZiel] = useState(NEUER_LIEFERANT);
+  const [importKontaktAnlegen, setImportKontaktAnlegen] = useState(true);
 
   useEffect(() => {
     if (!user) {
@@ -357,10 +694,147 @@ export default function CRM() {
     await historieSchreiben(auswahl, `Aufgabe gelöscht: ${aufgabe.titel}`);
   }
 
+
+  function importZuruecksetzen() {
+    setImportLaedt(false);
+    setImportFortschritt(0);
+    setImportStatus("");
+    setImportFehler("");
+    setImportDateiname("");
+    setImportText("");
+    setImportRohtextOffen(false);
+    setImportWarnungen([]);
+    setImportLieferant(leerLieferant);
+    setImportKontakt(leerKontakt);
+    setImportZiel(NEUER_LIEFERANT);
+    setImportKontaktAnlegen(true);
+  }
+
+  function importOeffnen() {
+    importZuruecksetzen();
+    setImportDialog(true);
+  }
+
+  async function dokumentVerarbeiten(datei) {
+    if (!datei) return;
+    setImportFehler("");
+    setMeldung("");
+
+    const istPdf = datei.type === "application/pdf" || datei.name.toLowerCase().endsWith(".pdf");
+    const istBild = datei.type.startsWith("image/") || /\.(png|jpe?g|webp)$/i.test(datei.name);
+    if (!istPdf && !istBild) {
+      setImportFehler("Bitte wähle ein PDF, JPG, PNG oder WebP aus.");
+      return;
+    }
+    if (datei.size > MAX_DATEIGROESSE) {
+      setImportFehler("Die Datei ist größer als 20 MB.");
+      return;
+    }
+
+    setImportLaedt(true);
+    setImportFortschritt(1);
+    setImportDateiname(datei.name);
+    setImportStatus(istPdf ? "PDF wird vorbereitet" : "Bild-OCR wird vorbereitet");
+
+    try {
+      const text = istPdf
+        ? await pdfTextAuslesen(datei, setImportStatus, setImportFortschritt)
+        : await bildTextAuslesen(datei, setImportStatus, setImportFortschritt);
+
+      if (text.length < 20) {
+        throw new Error("Es konnte kein ausreichend lesbarer Text erkannt werden. Nutze möglichst ein scharfes, gerades Bild.");
+      }
+
+      const erkannt = lieferantAusText(text, datei.name);
+      const passenderLieferant = passendenLieferantenFinden(lieferanten, erkannt.lieferant.firma);
+      setImportText(text);
+      setImportLieferant(erkannt.lieferant);
+      setImportKontakt(erkannt.kontakt);
+      setImportWarnungen([
+        ...erkannt.warnungen,
+        ...(istPdf && text.length < MIN_PDF_TEXTLAENGE
+          ? ["Das PDF wurde per OCR verarbeitet. Bitte alle Angaben besonders sorgfältig prüfen."]
+          : []),
+      ]);
+      setImportZiel(passenderLieferant?.id || NEUER_LIEFERANT);
+      setImportKontaktAnlegen(Boolean(erkannt.kontakt.name));
+      setImportFortschritt(100);
+      setImportStatus("Daten erkannt – bitte prüfen");
+    } catch (error) {
+      console.error(error);
+      setImportFehler(error.message || "Das Dokument konnte nicht verarbeitet werden.");
+    } finally {
+      setImportLaedt(false);
+    }
+  }
+
+  async function importDatenSpeichern() {
+    if (!user || !importLieferant.firma.trim()) {
+      setImportFehler("Bitte trage einen Firmennamen ein.");
+      return;
+    }
+
+    setSpeichert(true);
+    setImportFehler("");
+    try {
+      const lieferantDaten = {
+        ...importLieferant,
+        firma: importLieferant.firma.trim(),
+        userId: user.uid,
+        aktualisiertAm: serverTimestamp(),
+      };
+
+      let lieferantIdNeu = importZiel;
+      let lieferantFuerHistorie;
+      if (importZiel === NEUER_LIEFERANT) {
+        const ref = await addDoc(collection(db, "lieferanten"), {
+          ...lieferantDaten,
+          erstelltAm: serverTimestamp(),
+        });
+        lieferantIdNeu = ref.id;
+        lieferantFuerHistorie = { id: ref.id, firma: lieferantDaten.firma };
+        await historieSchreiben(lieferantFuerHistorie, "Lieferant per lokalem Dokumentenimport angelegt");
+      } else {
+        const bestehend = lieferanten.find((item) => item.id === importZiel);
+        const aktualisierung = Object.fromEntries(
+          Object.entries(lieferantDaten).filter(([schluessel, wert]) => (
+            ["userId", "aktualisiertAm", "status", "kategorie"].includes(schluessel)
+            || String(wert ?? "").trim()
+          )),
+        );
+        await updateDoc(doc(db, "lieferanten", importZiel), aktualisierung);
+        lieferantFuerHistorie = { id: importZiel, firma: lieferantDaten.firma || bestehend?.firma || "Lieferant" };
+        await historieSchreiben(lieferantFuerHistorie, "Lieferantendaten per lokalem Dokumentenimport aktualisiert");
+      }
+
+      if (importKontaktAnlegen && importKontakt.name.trim()) {
+        await addDoc(collection(db, "ansprechpartner"), {
+          ...importKontakt,
+          name: importKontakt.name.trim(),
+          userId: user.uid,
+          lieferantId: lieferantIdNeu,
+          firma: lieferantDaten.firma,
+          erstelltAm: serverTimestamp(),
+          aktualisiertAm: serverTimestamp(),
+        });
+        await historieSchreiben(lieferantFuerHistorie, `Ansprechpartner ${importKontakt.name.trim()} per Dokumentenimport angelegt`);
+      }
+
+      setImportDialog(false);
+      setMeldung(`Lieferantendaten erfolgreich ${importZiel === NEUER_LIEFERANT ? "angelegt" : "aktualisiert"}. Die Datei wurde nicht gespeichert.`);
+    } catch (error) {
+      console.error(error);
+      setImportFehler("Die erkannten Lieferantendaten konnten nicht gespeichert werden.");
+    } finally {
+      setSpeichert(false);
+    }
+  }
+
   if (auswahl) {
     return (
       <Box sx={{ p: { xs: 1.5, sm: 3 } }}>
         {fehler && <Alert severity="error" sx={{ mb: 2 }}>{fehler}</Alert>}
+        {meldung && <Alert severity="success" onClose={() => setMeldung("")} sx={{ mb: 2 }}>{meldung}</Alert>}
         <Stack direction={{ xs: "column", sm: "row" }} spacing={2} justifyContent="space-between" mb={2}>
           <Box>
             <Button startIcon={<ArrowBackIcon />} onClick={() => setAuswahl(null)} sx={{ mb: 1 }}>Zurück zur Übersicht</Button>
@@ -507,9 +981,13 @@ export default function CRM() {
   return (
     <Box sx={{ p: { xs: 1.5, sm: 3 } }}>
       {fehler && <Alert severity="error" sx={{ mb: 2 }}>{fehler}</Alert>}
+      {meldung && <Alert severity="success" onClose={() => setMeldung("")} sx={{ mb: 2 }}>{meldung}</Alert>}
       <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" spacing={2} mb={3}>
         <Box><Typography variant={mobil ? "h5" : "h4"} fontWeight={900}>Lieferanten-CRM</Typography><Typography color="text.secondary">Lieferanten, Ansprechpartner, Aufgaben und Verhandlungen zentral verwalten.</Typography></Box>
-        <Button variant="contained" startIcon={<AddIcon />} onClick={lieferantNeu}>Neuer Lieferant</Button>
+        <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
+          <Button variant="outlined" startIcon={<AutoFixHighIcon />} onClick={importOeffnen}>Dokument einlesen</Button>
+          <Button variant="contained" startIcon={<AddIcon />} onClick={lieferantNeu}>Neuer Lieferant</Button>
+        </Stack>
       </Stack>
 
       <Grid container spacing={2} mb={3}>
@@ -551,8 +1029,220 @@ export default function CRM() {
         {gefiltert.length === 0 && <Grid size={{ xs: 12 }}><Alert severity="info">Keine Lieferanten gefunden.</Alert></Grid>}
       </Grid>
 
+      <LieferantenImportDialog
+        open={importDialog}
+        onClose={() => setImportDialog(false)}
+        loading={importLaedt}
+        progress={importFortschritt}
+        statusText={importStatus}
+        error={importFehler}
+        filename={importDateiname}
+        rawText={importText}
+        rawTextOpen={importRohtextOffen}
+        setRawTextOpen={setImportRohtextOffen}
+        warnings={importWarnungen}
+        supplier={importLieferant}
+        setSupplier={setImportLieferant}
+        contact={importKontakt}
+        setContact={setImportKontakt}
+        target={importZiel}
+        setTarget={setImportZiel}
+        suppliers={lieferanten}
+        createContact={importKontaktAnlegen}
+        setCreateContact={setImportKontaktAnlegen}
+        onFile={dokumentVerarbeiten}
+        onSave={importDatenSpeichern}
+        saving={speichert}
+      />
       <LieferantDialog open={lieferantDialog} onClose={() => setLieferantDialog(false)} form={lieferantForm} setForm={setLieferantForm} onSave={lieferantSpeichern} editing={Boolean(lieferantId)} saving={speichert} />
     </Box>
+  );
+}
+
+
+function LieferantenImportDialog({
+  open,
+  onClose,
+  loading,
+  progress,
+  statusText,
+  error,
+  filename,
+  rawText,
+  rawTextOpen,
+  setRawTextOpen,
+  warnings,
+  supplier,
+  setSupplier,
+  contact,
+  setContact,
+  target,
+  setTarget,
+  suppliers,
+  createContact,
+  setCreateContact,
+  onFile,
+  onSave,
+  saving,
+}) {
+  const dateiInput = useRef(null);
+  const [dragAktiv, setDragAktiv] = useState(false);
+  const supplierChange = (event) => setSupplier((vorher) => ({ ...vorher, [event.target.name]: event.target.value }));
+  const contactChange = (event) => setContact((vorher) => ({ ...vorher, [event.target.name]: event.target.value }));
+  const hatErgebnis = Boolean(rawText);
+
+  function dateiUebernehmen(datei) {
+    if (datei) onFile(datei);
+  }
+
+  return (
+    <Dialog open={open} onClose={loading ? undefined : onClose} fullWidth maxWidth="md">
+      <DialogTitle>
+        <Stack direction="row" spacing={1.5} alignItems="center">
+          <AutoFixHighIcon color="primary" />
+          <Box>
+            <Typography variant="h6" fontWeight={900}>Lieferantendaten automatisch erkennen</Typography>
+            <Typography variant="body2" color="text.secondary">PDF, JPG, PNG oder Screenshot lokal auslesen und vor dem Speichern prüfen.</Typography>
+          </Box>
+        </Stack>
+      </DialogTitle>
+      <DialogContent>
+        <Alert severity="info" sx={{ mb: 2 }}>
+          Die Datei wird nur in deinem Browser verarbeitet. Weder die Datei noch der vollständige erkannte Text werden in Firebase gespeichert.
+        </Alert>
+        {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+        {warnings.map((warnung) => <Alert key={warnung} severity="warning" sx={{ mb: 1 }}>{warnung}</Alert>)}
+
+        <input
+          ref={dateiInput}
+          type="file"
+          hidden
+          accept="application/pdf,.pdf,image/jpeg,.jpg,.jpeg,image/png,.png,image/webp,.webp"
+          onChange={(event) => {
+            dateiUebernehmen(event.target.files?.[0]);
+            event.target.value = "";
+          }}
+        />
+
+        <Paper
+          variant="outlined"
+          onClick={() => !loading && dateiInput.current?.click()}
+          onDragEnter={(event) => { event.preventDefault(); setDragAktiv(true); }}
+          onDragOver={(event) => { event.preventDefault(); setDragAktiv(true); }}
+          onDragLeave={(event) => { event.preventDefault(); setDragAktiv(false); }}
+          onDrop={(event) => {
+            event.preventDefault();
+            setDragAktiv(false);
+            if (!loading) dateiUebernehmen(event.dataTransfer.files?.[0]);
+          }}
+          sx={{
+            p: 3,
+            mb: 2,
+            textAlign: "center",
+            cursor: loading ? "default" : "pointer",
+            borderStyle: "dashed",
+            borderWidth: 2,
+            borderColor: dragAktiv ? "primary.main" : "divider",
+            bgcolor: dragAktiv ? "action.hover" : "background.paper",
+          }}
+        >
+          {loading ? (
+            <Stack spacing={1.5} alignItems="center">
+              <CircularProgress size={38} />
+              <Typography fontWeight={800}>{statusText || "Dokument wird verarbeitet"}</Typography>
+              <LinearProgress variant="determinate" value={progress} sx={{ width: "100%", maxWidth: 440 }} />
+              <Typography variant="body2" color="text.secondary">{progress} %</Typography>
+            </Stack>
+          ) : (
+            <Stack spacing={1} alignItems="center">
+              <Stack direction="row" spacing={1}>
+                <PictureAsPdfIcon color="error" fontSize="large" />
+                <ImageSearchIcon color="primary" fontSize="large" />
+              </Stack>
+              <Typography variant="h6" fontWeight={900}>Dokument hier ablegen oder anklicken</Typography>
+              <Typography color="text.secondary">PDF, JPG, PNG oder WebP – maximal 20 MB</Typography>
+              {filename && <Chip label={filename} color="primary" variant="outlined" />}
+            </Stack>
+          )}
+        </Paper>
+
+        {hatErgebnis && (
+          <Stack spacing={2.5}>
+            <TextField
+              select
+              fullWidth
+              label="Speicherziel"
+              value={target}
+              onChange={(event) => setTarget(event.target.value)}
+            >
+              <MenuItem value={NEUER_LIEFERANT}>Neuen Lieferanten anlegen</MenuItem>
+              {suppliers.map((item) => <MenuItem key={item.id} value={item.id}>Bestehenden aktualisieren: {item.firma}</MenuItem>)}
+            </TextField>
+
+            <Paper variant="outlined" sx={{ p: 2 }}>
+              <Typography variant="h6" fontWeight={900} mb={2}>Erkannte Lieferantendaten</Typography>
+              <Grid container spacing={2}>
+                <Grid size={{ xs: 12, md: 8 }}><TextField fullWidth required name="firma" label="Firma" value={supplier.firma} onChange={supplierChange} /></Grid>
+                <Grid size={{ xs: 12, md: 4 }}><TextField fullWidth select name="status" label="Status" value={supplier.status} onChange={supplierChange}><MenuItem value="Aktiv">Aktiv</MenuItem><MenuItem value="Inaktiv">Inaktiv</MenuItem></TextField></Grid>
+                <Grid size={{ xs: 12, md: 6 }}><TextField fullWidth select name="kategorie" label="Kategorie" value={supplier.kategorie} onChange={supplierChange}>{["Material", "Maschine", "Fahrzeug", "Dienstleistung", "Personal", "Sonstiges"].map((wert) => <MenuItem key={wert} value={wert}>{wert}</MenuItem>)}</TextField></Grid>
+                <Grid size={{ xs: 12, md: 6 }}><TextField fullWidth name="kundennummer" label="Kundennummer" value={supplier.kundennummer} onChange={supplierChange} /></Grid>
+                <Grid size={{ xs: 12 }}><TextField fullWidth name="strasse" label="Straße und Hausnummer" value={supplier.strasse} onChange={supplierChange} /></Grid>
+                <Grid size={{ xs: 12, sm: 4 }}><TextField fullWidth name="plz" label="PLZ" value={supplier.plz} onChange={supplierChange} /></Grid>
+                <Grid size={{ xs: 12, sm: 8 }}><TextField fullWidth name="ort" label="Ort" value={supplier.ort} onChange={supplierChange} /></Grid>
+                <Grid size={{ xs: 12, md: 6 }}><TextField fullWidth name="telefon" label="Telefon" value={supplier.telefon} onChange={supplierChange} /></Grid>
+                <Grid size={{ xs: 12, md: 6 }}><TextField fullWidth name="email" type="email" label="E-Mail" value={supplier.email} onChange={supplierChange} /></Grid>
+                <Grid size={{ xs: 12 }}><TextField fullWidth name="website" label="Website" value={supplier.website} onChange={supplierChange} /></Grid>
+                <Grid size={{ xs: 12, md: 6 }}><TextField fullWidth name="zahlungsziel" label="Zahlungsziel" value={supplier.zahlungsziel} onChange={supplierChange} /></Grid>
+                <Grid size={{ xs: 12, md: 6 }}><TextField fullWidth name="skonto" label="Skonto" value={supplier.skonto} onChange={supplierChange} /></Grid>
+                <Grid size={{ xs: 12, md: 6 }}><TextField fullWidth name="standardrabatt" label="Standardrabatt" value={supplier.standardrabatt} onChange={supplierChange} /></Grid>
+                <Grid size={{ xs: 12, md: 6 }}><TextField fullWidth name="bonusvereinbarung" label="Bonusvereinbarung" value={supplier.bonusvereinbarung} onChange={supplierChange} /></Grid>
+                <Grid size={{ xs: 12 }}><TextField fullWidth name="lieferbedingungen" label="Lieferbedingungen" value={supplier.lieferbedingungen} onChange={supplierChange} /></Grid>
+                <Grid size={{ xs: 12 }}><TextField fullWidth multiline minRows={2} name="notizen" label="Notizen" value={supplier.notizen} onChange={supplierChange} /></Grid>
+              </Grid>
+            </Paper>
+
+            <Paper variant="outlined" sx={{ p: 2 }}>
+              <FormControlLabel
+                control={<Switch checked={createContact} onChange={(event) => setCreateContact(event.target.checked)} />}
+                label="Erkannten Ansprechpartner ebenfalls anlegen"
+              />
+              <Collapse in={createContact}>
+                <Grid container spacing={2} mt={0.5}>
+                  <Grid size={{ xs: 12, md: 6 }}><TextField fullWidth name="name" label="Name" value={contact.name} onChange={contactChange} /></Grid>
+                  <Grid size={{ xs: 12, md: 6 }}><TextField fullWidth name="position" label="Position / Abteilung" value={contact.position} onChange={contactChange} /></Grid>
+                  <Grid size={{ xs: 12, md: 6 }}><TextField fullWidth name="telefon" label="Telefon" value={contact.telefon} onChange={contactChange} /></Grid>
+                  <Grid size={{ xs: 12, md: 6 }}><TextField fullWidth name="mobil" label="Mobil" value={contact.mobil} onChange={contactChange} /></Grid>
+                  <Grid size={{ xs: 12 }}><TextField fullWidth name="email" type="email" label="E-Mail" value={contact.email} onChange={contactChange} /></Grid>
+                </Grid>
+              </Collapse>
+            </Paper>
+
+            <Button
+              variant="text"
+              startIcon={rawTextOpen ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+              onClick={() => setRawTextOpen(!rawTextOpen)}
+              sx={{ alignSelf: "flex-start" }}
+            >
+              Erkannten Text kontrollieren
+            </Button>
+            <Collapse in={rawTextOpen}>
+              <TextField fullWidth multiline minRows={8} value={rawText} slotProps={{ input: { readOnly: true } }} />
+            </Collapse>
+          </Stack>
+        )}
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose} disabled={loading}>Abbrechen</Button>
+        <Button
+          variant="contained"
+          startIcon={<CloudUploadIcon />}
+          onClick={onSave}
+          disabled={!hatErgebnis || loading || saving || !supplier.firma.trim()}
+        >
+          {saving ? "Speichert…" : target === NEUER_LIEFERANT ? "Lieferant anlegen" : "Lieferant aktualisieren"}
+        </Button>
+      </DialogActions>
+    </Dialog>
   );
 }
 
