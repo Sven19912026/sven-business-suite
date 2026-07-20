@@ -284,10 +284,7 @@ function initialsFor(user) {
 }
 
 function displayNameFor(user) {
-  if (user?.displayName?.trim()) return user.displayName.trim().split(' ')[0]
-  const emailName = user?.email?.split('@')[0]?.trim()
-  if (!emailName) return 'Sven'
-  return emailName.charAt(0).toUpperCase() + emailName.slice(1)
+  return 'Sven'
 }
 
 function currentGreeting() {
