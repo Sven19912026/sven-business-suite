@@ -19,6 +19,8 @@ import {
   Paper,
   Stack,
   TextField,
+  ToggleButton,
+  ToggleButtonGroup,
   Tooltip,
   Typography,
 } from '@mui/material'
@@ -32,6 +34,8 @@ import TaskAltIcon from '@mui/icons-material/TaskAlt'
 import TodayIcon from '@mui/icons-material/Today'
 import WarningAmberIcon from '@mui/icons-material/WarningAmber'
 import AssignmentIcon from '@mui/icons-material/Assignment'
+import HomeOutlinedIcon from '@mui/icons-material/HomeOutlined'
+import WorkIcon from '@mui/icons-material/Work'
 import {
   addDoc,
   collection,
@@ -60,6 +64,7 @@ const LEERE_AUFGABE = {
   faelligAm: '',
   wiederholung: 'Keine',
   erledigt: false,
+  bereich: '',
 }
 
 function heuteIso() {
@@ -72,6 +77,31 @@ function datumFormatieren(value) {
   if (!value) return 'Kein Termin'
   const datum = new Date(`${value}T00:00:00`)
   return Number.isNaN(datum.getTime()) ? value : datum.toLocaleDateString('de-DE')
+}
+
+function zeitstempelZuDatum(value) {
+  if (!value) return null
+  if (typeof value.toDate === 'function') return value.toDate()
+  if (typeof value.seconds === 'number') {
+    return new Date((value.seconds * 1000) + ((value.nanoseconds || 0) / 1000000))
+  }
+
+  const datum = value instanceof Date ? value : new Date(value)
+  return Number.isNaN(datum.getTime()) ? null : datum
+}
+
+function erledigtZeitFormatieren(value) {
+  const datum = zeitstempelZuDatum(value)
+  if (!datum) return 'Zeitpunkt nicht gespeichert'
+
+  return datum.toLocaleString('de-DE', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  })
+}
+
+function zeitstempelMillis(value) {
+  return zeitstempelZuDatum(value)?.getTime() || 0
 }
 
 function prioritaetsFarbe(prioritaet) {
@@ -114,6 +144,19 @@ export default function Aufgaben() {
   const [filterKategorie, setFilterKategorie] = useState('Alle')
   const [filterStatus, setFilterStatus] = useState('Offen')
   const [sortierung, setSortierung] = useState('Fälligkeit')
+  const [bereich, setBereich] = useState(() => {
+    const aktuelleUserId = auth.currentUser?.uid
+    if (!aktuelleUserId) return 'arbeit'
+
+    const gespeichert = localStorage.getItem(`sven-suite-aufgaben-bereich-${aktuelleUserId}`)
+    return gespeichert === 'privat' ? 'privat' : 'arbeit'
+  })
+  const [zeigeLetzteErledigte, setZeigeLetzteErledigte] = useState(() => {
+    const aktuelleUserId = auth.currentUser?.uid
+    if (!aktuelleUserId) return false
+
+    return localStorage.getItem(`sven-suite-letzte-erledigte-offen-${aktuelleUserId}`) === 'true'
+  })
 
   const [aufgabeDialog, setAufgabeDialog] = useState(false)
   const [aufgabeId, setAufgabeId] = useState(null)
@@ -245,18 +288,40 @@ export default function Aufgaben() {
     || kategorien.find((item) => String(item.name || '').trim().toLocaleLowerCase('de-DE') === STANDARD_KATEGORIE.toLocaleLowerCase('de-DE'))
   const heute = heuteIso()
   const offeneKategorienSchluessel = user ? `sven-suite-aufgaben-kategorien-${user.uid}` : ''
+  const bereichSchluessel = user ? `sven-suite-aufgaben-bereich-${user.uid}` : ''
+  const letzteErledigteSchluessel = user ? `sven-suite-letzte-erledigte-offen-${user.uid}` : ''
+  const bereichName = bereich === 'privat' ? 'Privat' : 'Arbeit'
+  const kategorienNameNachId = useMemo(
+    () => new Map(kategorien.map((kategorie) => [kategorie.id, kategorie.name])),
+    [kategorien],
+  )
+
+  // Nur Aufgaben mit einer ausdrücklichen Bereichszuordnung werden angezeigt.
+  // Bestehende Aufgaben ohne "bereich" bleiben unverändert und werden nicht automatisch migriert.
+  const bereichAufgaben = useMemo(
+    () => aufgaben.filter((aufgabe) => aufgabe.bereich === bereich),
+    [aufgaben, bereich],
+  )
 
   const kennzahlen = useMemo(() => ({
-    offen: aufgaben.filter((a) => !a.erledigt).length,
-    heute: aufgaben.filter((a) => !a.erledigt && a.faelligAm === heute).length,
-    ueberfaellig: aufgaben.filter((a) => !a.erledigt && a.faelligAm && a.faelligAm < heute).length,
-    erledigt: aufgaben.filter((a) => a.erledigt).length,
-  }), [aufgaben, heute])
+    offen: bereichAufgaben.filter((a) => !a.erledigt).length,
+    heute: bereichAufgaben.filter((a) => !a.erledigt && a.faelligAm === heute).length,
+    ueberfaellig: bereichAufgaben.filter((a) => !a.erledigt && a.faelligAm && a.faelligAm < heute).length,
+    erledigt: bereichAufgaben.filter((a) => a.erledigt).length,
+  }), [bereichAufgaben, heute])
+
+  const letzteErledigteAufgaben = useMemo(
+    () => [...bereichAufgaben]
+      .filter((aufgabe) => aufgabe.erledigt)
+      .sort((a, b) => zeitstempelMillis(b.erledigtAm) - zeitstempelMillis(a.erledigtAm))
+      .slice(0, 10),
+    [bereichAufgaben],
+  )
 
   const gefilterteAufgaben = useMemo(() => {
     const term = suche.trim().toLowerCase()
     const prioritaetsRang = { Hoch: 0, Mittel: 1, Niedrig: 2 }
-    return [...aufgaben]
+    return [...bereichAufgaben]
       .filter((item) => filterStatus === 'Alle' || (filterStatus === 'Erledigt' ? item.erledigt : !item.erledigt))
       .filter((item) => filterKategorie === 'Alle' || item.kategorieId === filterKategorie)
       .filter((item) => !term || [item.titel, item.beschreibung, item.notizen, item.verantwortlich].some((wert) => String(wert || '').toLowerCase().includes(term)))
@@ -265,7 +330,7 @@ export default function Aufgaben() {
         if (sortierung === 'Titel') return String(a.titel).localeCompare(String(b.titel), 'de')
         return String(a.faelligAm || '9999-12-31').localeCompare(String(b.faelligAm || '9999-12-31'))
       })
-  }, [aufgaben, filterKategorie, filterStatus, sortierung, suche])
+  }, [bereichAufgaben, filterKategorie, filterStatus, sortierung, suche])
 
   const kategorienGruppen = useMemo(() => {
     const gruppen = sortierteKategorien
@@ -284,10 +349,29 @@ export default function Aufgaben() {
     return gruppen
   }, [gefilterteAufgaben, kategorien, sortierteKategorien])
 
+  function bereichWechseln(_event, neuerBereich) {
+    if (!neuerBereich) return
+
+    setBereich(neuerBereich)
+    setFilterKategorie('Alle')
+    if (bereichSchluessel) localStorage.setItem(bereichSchluessel, neuerBereich)
+  }
+
+  function letzteErledigteUmschalten() {
+    setZeigeLetzteErledigte((vorher) => {
+      const naechsterStand = !vorher
+      if (letzteErledigteSchluessel) {
+        localStorage.setItem(letzteErledigteSchluessel, String(naechsterStand))
+      }
+      return naechsterStand
+    })
+  }
+
   function neueAufgabe(kategorieId = '') {
     setAufgabeId(null)
     setAufgabeForm({
       ...LEERE_AUFGABE,
+      bereich,
       kategorieId: kategorieId || standardKategorie?.id || sortierteKategorien[0]?.id || '',
     })
     setAufgabeDialog(true)
@@ -317,7 +401,12 @@ export default function Aufgaben() {
 
   function aufgabeBearbeiten(aufgabe) {
     setAufgabeId(aufgabe.id)
-    setAufgabeForm({ ...LEERE_AUFGABE, ...aufgabe, status: aufgabe.erledigt ? 'Erledigt' : (aufgabe.status || 'Offen') })
+    setAufgabeForm({
+      ...LEERE_AUFGABE,
+      ...aufgabe,
+      bereich: aufgabe.bereich || bereich,
+      status: aufgabe.erledigt ? 'Erledigt' : (aufgabe.status || 'Offen'),
+    })
     setAufgabeDialog(true)
   }
 
@@ -329,11 +418,15 @@ export default function Aufgaben() {
       const erledigt = aufgabeForm.status === 'Erledigt'
       const daten = {
         ...aufgabeForm,
+        bereich: aufgabeForm.bereich || bereich,
         titel: aufgabeForm.titel.trim(),
         beschreibung: aufgabeForm.beschreibung.trim(),
         notizen: aufgabeForm.notizen.trim(),
         verantwortlich: aufgabeForm.verantwortlich.trim(),
         erledigt,
+        erledigtAm: erledigt
+          ? (aufgabeForm.erledigt && aufgabeForm.erledigtAm ? aufgabeForm.erledigtAm : serverTimestamp())
+          : null,
         userId: user.uid,
         aktualisiertAm: serverTimestamp(),
       }
@@ -361,6 +454,8 @@ export default function Aufgaben() {
           id: undefined,
           erledigt: false,
           status: 'Offen',
+          erledigtAm: null,
+          bereich: aufgabe.bereich || bereich,
           faelligAm: naechstesDatum(aufgabe.faelligAm, aufgabe.wiederholung),
           userId: user.uid,
           erstelltAm: serverTimestamp(),
@@ -426,15 +521,88 @@ export default function Aufgaben() {
       <Paper sx={{ p: { xs: 2.5, sm: 3 } }}>
         <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" gap={2}>
           <Box>
-            <Typography variant="overline" color="primary" fontWeight={800}>Version 2.1</Typography>
+            <Typography variant="overline" color="primary" fontWeight={800}>Business Suite 4.1</Typography>
             <Typography variant="h4" fontWeight={800}>Aufgaben</Typography>
-            <Typography color="text.secondary" mt={0.5}>Planen, priorisieren und Aufgaben übersichtlich in ein- und ausklappbaren Kategorien verwalten.</Typography>
+            <Typography color="text.secondary" mt={0.5}>Aufgaben für Arbeit und Privat getrennt planen, priorisieren und verwalten.</Typography>
           </Box>
           <Stack direction={{ xs: 'column', sm: 'row' }} gap={1}>
             <Button startIcon={<CategoryIcon />} variant="outlined" onClick={neueKategorie}>Kategorie</Button>
             <Button startIcon={<AddIcon />} variant="contained" onClick={neueAufgabe} disabled={!kategorien.length}>Neue Aufgabe</Button>
           </Stack>
         </Stack>
+      </Paper>
+
+      <Paper
+        variant="outlined"
+        sx={{
+          width: '100%',
+          maxWidth: 680,
+          mx: 'auto',
+          p: 0.75,
+          borderRadius: 4,
+          bgcolor: 'action.hover',
+          boxShadow: '0 10px 30px rgba(15, 23, 42, 0.08)',
+        }}
+      >
+        <ToggleButtonGroup
+          value={bereich}
+          exclusive
+          onChange={bereichWechseln}
+          aria-label="Aufgabenbereich auswählen"
+          sx={{
+            width: '100%',
+            display: 'grid',
+            gridTemplateColumns: '1fr 1fr',
+            gap: 0.75,
+            '& .MuiToggleButtonGroup-grouped': {
+              m: 0,
+              border: 0,
+              borderRadius: '14px !important',
+            },
+            '& .MuiToggleButton-root': {
+              minHeight: 62,
+              px: { xs: 1.25, sm: 2 },
+              py: 1.1,
+              color: 'text.secondary',
+              textTransform: 'none',
+              transition: 'transform 160ms ease, box-shadow 160ms ease, background-color 160ms ease',
+              '&:hover': {
+                bgcolor: 'background.paper',
+                color: 'primary.main',
+              },
+              '&.Mui-selected': {
+                bgcolor: 'primary.main',
+                color: 'primary.contrastText',
+                boxShadow: 3,
+                transform: 'translateY(-1px)',
+                '&:hover': { bgcolor: 'primary.dark' },
+              },
+            },
+          }}
+        >
+          <ToggleButton value="arbeit" aria-label="Arbeitsaufgaben anzeigen">
+            <Stack direction="row" alignItems="center" justifyContent="center" spacing={1.25}>
+              <WorkIcon />
+              <Box sx={{ textAlign: 'left' }}>
+                <Typography fontWeight={900} lineHeight={1.15}>Arbeit</Typography>
+                <Typography variant="caption" sx={{ opacity: 0.8, display: { xs: 'none', sm: 'block' } }}>
+                  Berufliche Aufgaben
+                </Typography>
+              </Box>
+            </Stack>
+          </ToggleButton>
+          <ToggleButton value="privat" aria-label="Private Aufgaben anzeigen">
+            <Stack direction="row" alignItems="center" justifyContent="center" spacing={1.25}>
+              <HomeOutlinedIcon />
+              <Box sx={{ textAlign: 'left' }}>
+                <Typography fontWeight={900} lineHeight={1.15}>Privat</Typography>
+                <Typography variant="caption" sx={{ opacity: 0.8, display: { xs: 'none', sm: 'block' } }}>
+                  Persönliche Aufgaben
+                </Typography>
+              </Box>
+            </Stack>
+          </ToggleButton>
+        </ToggleButtonGroup>
       </Paper>
 
       {fehler && <Alert severity="error" onClose={() => setFehler('')}>{fehler}</Alert>}
@@ -445,6 +613,97 @@ export default function Aufgaben() {
         <Kennzahl icon={<WarningAmberIcon color="error" />} label="Überfällig" wert={kennzahlen.ueberfaellig} />
         <Kennzahl icon={<TaskAltIcon color="success" />} label="Erledigt" wert={kennzahlen.erledigt} />
       </Box>
+
+      <Paper variant="outlined" sx={{ overflow: 'hidden' }}>
+        <Stack
+          direction="row"
+          alignItems="center"
+          gap={1.25}
+          role="button"
+          tabIndex={0}
+          aria-expanded={zeigeLetzteErledigte}
+          onClick={letzteErledigteUmschalten}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault()
+              letzteErledigteUmschalten()
+            }
+          }}
+          sx={{
+            p: { xs: 1.5, sm: 2 },
+            cursor: 'pointer',
+            bgcolor: zeigeLetzteErledigte ? 'action.selected' : 'background.paper',
+            '&:hover': { bgcolor: 'action.hover' },
+          }}
+        >
+          <IconButton
+            size="small"
+            tabIndex={-1}
+            aria-label={zeigeLetzteErledigte ? 'Zuletzt erledigte Aufgaben schließen' : 'Zuletzt erledigte Aufgaben öffnen'}
+          >
+            {zeigeLetzteErledigte ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+          </IconButton>
+          <TaskAltIcon color="success" />
+          <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+            <Typography fontWeight={900}>Zuletzt erledigt</Typography>
+            <Typography variant="body2" color="text.secondary">
+              Die letzten {letzteErledigteAufgaben.length} von maximal 10 erledigten Aufgaben in {bereichName}
+            </Typography>
+          </Box>
+          <Chip
+            size="small"
+            color={zeigeLetzteErledigte ? 'success' : 'default'}
+            label={letzteErledigteAufgaben.length}
+          />
+        </Stack>
+
+        <Collapse in={zeigeLetzteErledigte} timeout="auto" unmountOnExit>
+          <Divider />
+          <Stack spacing={1} sx={{ p: { xs: 1.25, sm: 1.75 } }}>
+            {letzteErledigteAufgaben.length === 0 ? (
+              <Typography color="text.secondary" sx={{ py: 1, textAlign: 'center' }}>
+                Noch keine erledigten Aufgaben in {bereichName} vorhanden.
+              </Typography>
+            ) : letzteErledigteAufgaben.map((aufgabe) => (
+              <Paper key={aufgabe.id} variant="outlined" sx={{ p: 1.25 }}>
+                <Stack direction="row" gap={1} alignItems="flex-start">
+                  <Checkbox
+                    checked
+                    size="small"
+                    onChange={() => aufgabeStatusAendern(aufgabe)}
+                    inputProps={{ 'aria-label': `Aufgabe ${aufgabe.titel} wieder öffnen` }}
+                  />
+                  <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+                    <Typography fontWeight={800} sx={{ textDecoration: 'line-through' }}>
+                      {aufgabe.titel}
+                    </Typography>
+                    <Stack direction="row" gap={1} alignItems="center" flexWrap="wrap" mt={0.75}>
+                      <Chip
+                        size="small"
+                        variant="outlined"
+                        label={kategorienNameNachId.get(aufgabe.kategorieId) || 'Ohne Kategorie'}
+                      />
+                      <Typography variant="body2" color="text.secondary">
+                        Erledigt am {erledigtZeitFormatieren(aufgabe.erledigtAm)}
+                      </Typography>
+                    </Stack>
+                  </Box>
+                  <Tooltip title="Bearbeiten">
+                    <IconButton size="small" onClick={() => aufgabeBearbeiten(aufgabe)}>
+                      <EditIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                  <Tooltip title="Löschen">
+                    <IconButton size="small" color="error" onClick={() => aufgabeLoeschen(aufgabe)}>
+                      <DeleteIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                </Stack>
+              </Paper>
+            ))}
+          </Stack>
+        </Collapse>
+      </Paper>
 
       <Paper sx={{ p: 2 }}>
         <Stack direction={{ xs: 'column', lg: 'row' }} spacing={2} alignItems={{ lg: 'center' }}>
@@ -477,7 +736,7 @@ export default function Aufgaben() {
             )}
           </Stack>
 
-          {!gefilterteAufgaben.length && <Paper sx={{ p: 5, textAlign: 'center' }}><TaskAltIcon color="disabled" sx={{ fontSize: 52 }} /><Typography variant="h6" fontWeight={700} mt={1}>Keine Aufgaben gefunden</Typography></Paper>}
+          {!gefilterteAufgaben.length && <Paper sx={{ p: 5, textAlign: 'center' }}><TaskAltIcon color="disabled" sx={{ fontSize: 52 }} /><Typography variant="h6" fontWeight={700} mt={1}>Keine Aufgaben in „{bereichName}“ gefunden</Typography></Paper>}
 
           {kategorienGruppen.map((gruppe) => {
             const istOffen = offeneKategorien[gruppe.id] !== false
@@ -568,8 +827,8 @@ export default function Aufgaben() {
           <Stack direction="row" justifyContent="space-between" alignItems="center"><Typography variant="h6" fontWeight={800}>Kategorien</Typography><IconButton color="primary" onClick={neueKategorie}><AddIcon /></IconButton></Stack>
           <Divider sx={{ my: 1.5 }} />
           <Stack spacing={1}>{sortierteKategorien.map((kategorie) => {
-            const anzahl = aufgaben.filter((item) => item.kategorieId === kategorie.id).length
-            return <Stack key={kategorie.id} direction="row" alignItems="center" gap={1} sx={{ py: 0.5 }}><Box sx={{ flexGrow: 1 }}><Typography fontWeight={700}>{kategorie.name}</Typography><Typography variant="body2" color="text.secondary">{anzahl} Aufgabe{anzahl === 1 ? '' : 'n'}</Typography></Box><IconButton size="small" onClick={() => kategorieBearbeiten(kategorie)}><EditIcon fontSize="small" /></IconButton><IconButton size="small" color="error" disabled={Boolean(kategorie.system)} onClick={() => loeschenVorbereiten(kategorie)}><DeleteIcon fontSize="small" /></IconButton></Stack>
+            const anzahl = bereichAufgaben.filter((item) => item.kategorieId === kategorie.id).length
+            return <Stack key={kategorie.id} direction="row" alignItems="center" gap={1} sx={{ py: 0.5 }}><Box sx={{ flexGrow: 1 }}><Typography fontWeight={700}>{kategorie.name}</Typography><Typography variant="body2" color="text.secondary">{anzahl} Aufgabe{anzahl === 1 ? '' : 'n'} in {bereichName}</Typography></Box><IconButton size="small" onClick={() => kategorieBearbeiten(kategorie)}><EditIcon fontSize="small" /></IconButton><IconButton size="small" color="error" disabled={Boolean(kategorie.system)} onClick={() => loeschenVorbereiten(kategorie)}><DeleteIcon fontSize="small" /></IconButton></Stack>
           })}</Stack>
         </Paper>
       </Box>
@@ -577,6 +836,13 @@ export default function Aufgaben() {
       <Dialog open={aufgabeDialog} onClose={() => setAufgabeDialog(false)} fullWidth maxWidth="sm">
         <DialogTitle>{aufgabeId ? 'Aufgabe bearbeiten' : 'Aufgabe anlegen'}</DialogTitle>
         <DialogContent><Stack spacing={2} mt={1}>
+          <Chip
+            icon={aufgabeForm.bereich === 'privat' ? <HomeOutlinedIcon /> : <WorkIcon />}
+            label={aufgabeForm.bereich === 'privat' ? 'Privat' : 'Arbeit'}
+            color="primary"
+            variant="outlined"
+            sx={{ alignSelf: 'flex-start', fontWeight: 750 }}
+          />
           <TextField label="Titel" value={aufgabeForm.titel} onChange={(e) => setAufgabeForm({ ...aufgabeForm, titel: e.target.value })} required autoFocus />
           <TextField label="Beschreibung" value={aufgabeForm.beschreibung} onChange={(e) => setAufgabeForm({ ...aufgabeForm, beschreibung: e.target.value })} multiline minRows={2} />
           <TextField label="Notizen" value={aufgabeForm.notizen} onChange={(e) => setAufgabeForm({ ...aufgabeForm, notizen: e.target.value })} multiline minRows={2} />
