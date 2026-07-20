@@ -66,6 +66,7 @@ import { auth, db } from "../firebase";
 const leerVerhandlungsFormular = {
   lieferantId: "",
   firma: "",
+  verhandlungsgegenstand: "",
   ansprechpartner: "",
   telefon: "",
   email: "",
@@ -325,6 +326,9 @@ export default function Verhandlungen() {
       const passtSuche =
         suchbegriff === "" ||
         eintrag.firma?.toLowerCase().includes(suchbegriff) ||
+        eintrag.verhandlungsgegenstand
+          ?.toLowerCase()
+          .includes(suchbegriff) ||
         eintrag.ansprechpartner?.toLowerCase().includes(suchbegriff) ||
         eintrag.kategorie?.toLowerCase().includes(suchbegriff) ||
         eintrag.email?.toLowerCase().includes(suchbegriff) ||
@@ -449,6 +453,7 @@ export default function Verhandlungen() {
     setVerhandlungsFormular({
       lieferantId: eintrag.lieferantId ?? "",
       firma: eintrag.firma ?? "",
+      verhandlungsgegenstand: eintrag.verhandlungsgegenstand ?? "",
       ansprechpartner: eintrag.ansprechpartner ?? "",
       telefon: eintrag.telefon ?? "",
       email: eintrag.email ?? "",
@@ -519,6 +524,9 @@ export default function Verhandlungen() {
 
     const daten = {
       ...verhandlungsFormular,
+      firma: verhandlungsFormular.firma.trim(),
+      verhandlungsgegenstand:
+        verhandlungsFormular.verhandlungsgegenstand.trim(),
       userId: benutzer.uid,
       ausgangsangebot: euroWert(verhandlungsFormular.ausgangsangebot),
       aktuellesAngebot: euroWert(verhandlungsFormular.aktuellesAngebot),
@@ -749,7 +757,8 @@ export default function Verhandlungen() {
             Verhandlungen & Lieferanten
           </Typography>
           <Typography color="text.secondary">
-            Preise, Kontakte, Konditionen und Wiedervorlagen verwalten
+            Preise, Verhandlungsgegenstände, Kontakte, Konditionen und
+            Wiedervorlagen verwalten
           </Typography>
         </Box>
 
@@ -847,7 +856,7 @@ export default function Verhandlungen() {
                 <TextField
                   fullWidth
                   label="Suchen"
-                  placeholder="Firma, Ansprechpartner, Kategorie, E-Mail oder Notiz"
+                  placeholder="Firma, Verhandlungsgegenstand, Ansprechpartner, Kategorie, E-Mail oder Notiz"
                   value={suche}
                   onChange={(event) => setSuche(event.target.value)}
                   slotProps={{
@@ -944,6 +953,30 @@ export default function Verhandlungen() {
                       </Box>
                     </Stack>
 
+                    <Paper
+                      variant="outlined"
+                      sx={{
+                        p: 1.5,
+                        mt: 2,
+                        bgcolor: "action.hover",
+                        borderColor: "divider",
+                      }}
+                    >
+                      <Typography
+                        variant="caption"
+                        color="text.secondary"
+                        fontWeight={700}
+                      >
+                        Verhandlungsgegenstand
+                      </Typography>
+                      <Typography
+                        fontWeight={800}
+                        sx={{ mt: 0.25, whiteSpace: "pre-wrap" }}
+                      >
+                        {eintrag.verhandlungsgegenstand || "Nicht hinterlegt"}
+                      </Typography>
+                    </Paper>
+
                     <Stack
                       direction="row"
                       spacing={1}
@@ -1025,6 +1058,19 @@ export default function Verhandlungen() {
                         Firma
                       </TableSortLabel>
                     </TableCell>
+                    <TableCell>
+                      <TableSortLabel
+                        active={sortierung === "verhandlungsgegenstand"}
+                        direction={
+                          sortierung === "verhandlungsgegenstand"
+                            ? sortRichtung
+                            : "asc"
+                        }
+                        onClick={() => sortieren("verhandlungsgegenstand")}
+                      >
+                        Verhandlungsgegenstand
+                      </TableSortLabel>
+                    </TableCell>
                     <TableCell>Ansprechpartner</TableCell>
                     <TableCell>Status</TableCell>
                     <TableCell>Priorität</TableCell>
@@ -1044,6 +1090,17 @@ export default function Verhandlungen() {
                         </Typography>
                         <Typography variant="caption" color="text.secondary">
                           {eintrag.kategorie}
+                        </Typography>
+                      </TableCell>
+                      <TableCell sx={{ minWidth: 240, maxWidth: 360 }}>
+                        <Typography
+                          fontWeight={700}
+                          sx={{
+                            whiteSpace: "normal",
+                            overflowWrap: "anywhere",
+                          }}
+                        >
+                          {eintrag.verhandlungsgegenstand || "—"}
                         </Typography>
                       </TableCell>
                       <TableCell>
@@ -1492,6 +1549,19 @@ export default function Verhandlungen() {
                 name="firma"
                 value={verhandlungsFormular.firma}
                 onChange={verhandlungsFeldAendern}
+              />
+            </Grid>
+            <Grid size={{ xs: 12 }}>
+              <TextField
+                fullWidth
+                label="Verhandlungsgegenstand"
+                name="verhandlungsgegenstand"
+                value={verhandlungsFormular.verhandlungsgegenstand}
+                onChange={verhandlungsFeldAendern}
+                multiline
+                minRows={2}
+                placeholder="z. B. Jahreskonditionen, Fahrzeugkauf, Mietpreis oder Materialrabatt"
+                helperText="Beschreibe kurz, worüber mit diesem Lieferanten verhandelt wird."
               />
             </Grid>
             <Grid size={{ xs: 12, md: 6 }}>
