@@ -251,7 +251,7 @@ export default function VerhandlungenWettbewerb() {
         console.error(error)
 
         setFehler(
-          'Wettbewerbe konnten nicht geladen werden. PrÃ¼fe die Firestore-Regeln.',
+          'Wettbewerbe konnten nicht geladen werden. Prüfe die Firestore-Regeln.',
         )
 
         setLaden(false)
@@ -475,7 +475,7 @@ export default function VerhandlungenWettbewerb() {
 
     if (!titel) {
       setFehler(
-        'Bitte einen Namen fÃ¼r den Wettbewerb eintragen.',
+        'Bitte einen Namen für den Wettbewerb eintragen.',
       )
       return
     }
@@ -488,7 +488,7 @@ export default function VerhandlungenWettbewerb() {
 
     if (gueltigeAnbieter.length < 2) {
       setFehler(
-        'Bitte mindestens zwei Anbieter fÃ¼r den Wettbewerb eintragen.',
+        'Bitte mindestens zwei Anbieter für den Wettbewerb eintragen.',
       )
       return
     }
@@ -601,7 +601,7 @@ export default function VerhandlungenWettbewerb() {
       console.error(error)
 
       setFehler(
-        'Der Wettbewerb konnte nicht gespeichert werden. PrÃ¼fe die Firestore-Regeln.',
+        'Der Wettbewerb konnte nicht gespeichert werden. Prüfe die Firestore-Regeln.',
       )
     } finally {
       setSpeichert(false)
@@ -610,7 +610,7 @@ export default function VerhandlungenWettbewerb() {
 
   async function loeschen(wettbewerb) {
     const bestaetigt = window.confirm(
-      `Wettbewerb â€ž${wettbewerb.titel}â€œ wirklich lÃ¶schen?`,
+      `Wettbewerb „${wettbewerb.titel}“ wirklich löschen?`,
     )
 
     if (!bestaetigt) {
@@ -629,7 +629,7 @@ export default function VerhandlungenWettbewerb() {
       console.error(error)
 
       setFehler(
-        'Der Wettbewerb konnte nicht gelÃ¶scht werden.',
+        'Der Wettbewerb konnte nicht gelöscht werden.',
       )
     }
   }
@@ -658,7 +658,7 @@ export default function VerhandlungenWettbewerb() {
             variant="h4"
             fontWeight={850}
           >
-            Verhandlungen â€“ Wettbewerb
+            Verhandlungen – Wettbewerb
           </Typography>
 
           <Typography color="text.secondary">
@@ -706,7 +706,7 @@ export default function VerhandlungenWettbewerb() {
 
       {laden ? (
         <Typography>
-          Wettbewerbe werden geladen â€¦
+          Wettbewerbe werden geladen …
         </Typography>
       ) : gefilterteWettbewerbe.length ===
         0 ? (
@@ -824,7 +824,7 @@ export default function VerhandlungenWettbewerb() {
                           </IconButton>
                         </Tooltip>
 
-                        <Tooltip title="LÃ¶schen">
+                        <Tooltip title="Löschen">
                           <IconButton
                             color="error"
                             onClick={() =>
@@ -932,7 +932,7 @@ export default function VerhandlungenWettbewerb() {
                                           icon={
                                             <EmojiEventsIcon />
                                           }
-                                          label="GÃ¼nstigster"
+                                          label="Günstigster"
                                         />
                                       )}
 
@@ -1003,13 +1003,13 @@ export default function VerhandlungenWettbewerb() {
                                   <TableCell>
                                     {eintrag.lieferzeit
                                       ? `${eintrag.lieferzeit} Tage`
-                                      : 'â€”'}
+                                      : '—'}
                                   </TableCell>
 
                                   <TableCell>
                                     {eintrag.zahlungsziel
                                       ? `${eintrag.zahlungsziel} Tage`
-                                      : 'â€”'}
+                                      : '—'}
                                   </TableCell>
                                 </TableRow>
                               )
@@ -1062,14 +1062,14 @@ export default function VerhandlungenWettbewerb() {
                           color="text.secondary"
                           fontWeight={800}
                         >
-                          VERGABEBEGRÃœNDUNG
+                          VERGABEBEGRÜNDUNG
                         </Typography>
 
                         <Typography
                           sx={{ mt: 0.5 }}
                         >
                           {wettbewerb.vergabeBegruendung ||
-                            'Noch keine BegrÃ¼ndung hinterlegt.'}
+                            'Noch keine Begründung hinterlegt.'}
                         </Typography>
                       </Paper>
                     </Box>
@@ -1138,8 +1138,8 @@ export default function VerhandlungenWettbewerb() {
                   Offen
                 </MenuItem>
 
-                <MenuItem value="In PrÃ¼fung">
-                  In PrÃ¼fung
+                <MenuItem value="In Prüfung">
+                  In Prüfung
                 </MenuItem>
 
                 <MenuItem value="Abgeschlossen">
@@ -1195,7 +1195,7 @@ export default function VerhandlungenWettbewerb() {
                   anbieterHinzufuegen
                 }
               >
-                Anbieter hinzufÃ¼gen
+                Anbieter hinzufügen
               </Button>
             </Stack>
 
@@ -1248,7 +1248,7 @@ export default function VerhandlungenWettbewerb() {
                             icon={
                               <EmojiEventsIcon />
                             }
-                            label="Aktuell gÃ¼nstigster"
+                            label="Aktuell günstigster"
                           />
                         )}
                       </Stack>
@@ -1585,7 +1585,7 @@ export default function VerhandlungenWettbewerb() {
               <TextField
                 fullWidth
                 name="vergabeBegruendung"
-                label="VergabebegrÃ¼ndung"
+                label="Vergabebegründung"
                 value={
                   formular.vergabeBegruendung
                 }
@@ -1615,7 +1615,7 @@ export default function VerhandlungenWettbewerb() {
             disabled={speichert}
           >
             {speichert
-              ? 'Speichert â€¦'
+              ? 'Speichert …'
               : 'Speichern'}
           </Button>
         </DialogActions>
