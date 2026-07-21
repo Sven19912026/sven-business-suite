@@ -64,6 +64,8 @@ import {
 import { GlobalWorkerOptions, getDocument } from "pdfjs-dist";
 import pdfWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { auth, db } from "../firebase";
+import Dokumentablage from "../components/Dokumentablage";
+import { alleDokumenteLoeschen } from "../services/dokumente";
 
 GlobalWorkerOptions.workerSrc = pdfWorker;
 
@@ -641,6 +643,7 @@ export default function CRM({ onOpenNegotiation }) {
   async function lieferantLoeschen(lieferant) {
     if (!window.confirm(`${lieferant.firma} wirklich löschen?`)) return;
     try {
+      await alleDokumenteLoeschen("lieferant", lieferant.id);
       await deleteDoc(doc(db, "lieferanten", lieferant.id));
       if (auswahl?.id === lieferant.id) setAuswahl(null);
     } catch (error) {
@@ -1048,6 +1051,7 @@ delete vertragsFormularDaten._sourceCollection;
             <Tab label={`Verhandlungen (${lieferantenVerhandlungen.length})`} />
             <Tab label={`Aufgaben (${lieferantenAufgaben.filter((x) => x.status !== "Erledigt").length})`} />
             <Tab label="Konditionen" />
+            <Tab label="Dokumente" />
             <Tab label="Historie" />
           </Tabs>
         </Paper>
@@ -1254,6 +1258,14 @@ delete vertragsFormularDaten._sourceCollection;
         )}
 
         {detailTab === 6 && (
+          <Dokumentablage
+            ownerType="lieferant"
+            ownerId={auswahl.id}
+            ownerLabel={auswahl.firma}
+          />
+        )}
+
+        {detailTab === 7 && (
           <Stack spacing={1.5}>
             {lieferantenHistorie.map((h) => <Card key={h.id} variant="outlined"><CardContent><Stack direction="row" spacing={2} alignItems="center"><HistoryIcon color="action" /><Box><Typography fontWeight={700}>{h.text}</Typography><Typography color="text.secondary" variant="body2">{h.erstelltAm?.toDate ? h.erstelltAm.toDate().toLocaleString("de-DE") : "Gerade eben"}</Typography></Box></Stack></CardContent></Card>)}
             {lieferantenHistorie.length === 0 && <Alert severity="info">Noch keine Historieneinträge vorhanden.</Alert>}

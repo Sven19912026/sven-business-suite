@@ -1,33 +1,22 @@
-# Build- und Prüfbericht – Sven Business Suite 4.0
+# Sven Business Suite 5.0 – Phase 1
 
-Stand: 19. Juli 2026
+## Umgesetzt
 
-## Durchgeführte Prüfungen
+- Firebase-Storage-Dokumentablage direkt in jeder Lieferanten-/Dienstleisterakte.
+- Dokumentarten: Verträge, Bonusvereinbarungen, Preislisten, Angebote und Sonstiges.
+- Dokumentablage direkt im Bearbeitungsdialog jeder bestehenden Verhandlung.
+- Upload bis 30 MB mit Fortschrittsanzeige, Dateigröße, Kategorie, Öffnen und vollständigem Löschen aus Storage und Firestore.
+- Rückwärtskompatible Unterkollektionen; bestehende Datenmodelle und Funktionen bleiben unverändert.
+- Verhandlungsstatus `Abgeschlossen`, `Gewonnen` oder `Verloren` startet eine 30-Tage-Aufbewahrungsfrist.
+- Wieder geöffnete Verhandlungen verlieren die automatische Löschfrist.
+- Stündliche Firebase Cloud Function löscht nach Fristablauf Datei und Firestore-Metadatensatz.
+- Zusätzliche clientseitige Bereinigung als Sicherheitsnetz.
+- Beim manuellen Löschen eines Lieferanten oder einer Verhandlung werden zugehörige Dateien ebenfalls entfernt.
 
-- `npm run lint` erfolgreich
-- `npm run build` erfolgreich
-- `npm run check` erfolgreich
-- Produktions-Preview lokal gestartet
-- Startseite über HTTP mit Status 200 geladen
-- JavaScript-Bundle über HTTP mit Status 200 geladen
-- CSS-Bundle über HTTP mit Status 200 geladen
-- Favicon über HTTP mit Status 200 geladen
-- Relative Asset-Pfade für die portable Veröffentlichung geprüft
-- ZIP-Inhalt auf ausgeschlossene Inhalte geprüft
+## Firebase-Einrichtung
 
-## Integrität der bestehenden Funktionen
+Siehe `FIREBASE-DOKUMENTABLAGE.md`. Die Storage-/Firestore-Regeln müssen in die vorhandenen Regeln eingefügt und die Cloud Function einmalig bereitgestellt werden.
 
-Die produktiven Fachmodule und die Firebase-Konfiguration wurden gegenüber der bereitgestellten Ausgangs-ZIP nicht verändert:
+## Prüfung
 
-- `src/firebase.js`
-- `src/pages/Aufgaben.jsx`
-- `src/pages/CRM.jsx`
-- `src/pages/Mitarbeiter.jsx`
-- `src/pages/Verhandlungen.jsx`
-- `src/pages/Vertraege.jsx`
-
-Damit bleiben insbesondere Collection-Namen, Schreibvorgänge, Filter, Formulare und die vorhandene Aufgaben-Kategorienlogik erhalten.
-
-## Produktionsdateien
-
-Der fertige Build liegt im Verzeichnis `dist` und ist Bestandteil des Repository-Pakets.
+`npm run check` erfolgreich ausgeführt: ESLint ohne Fehler, Vite-Produktionsbuild erfolgreich, PWA-Service-Worker erzeugt. Der vollständige Lauf steht in `CHECK-RESULT.txt`.

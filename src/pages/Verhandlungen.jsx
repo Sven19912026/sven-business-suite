@@ -57,7 +57,9 @@ import DirectionsCarIcon from "@mui/icons-material/DirectionsCar";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 
 import {
+  Timestamp,
   collection,
+  deleteField,
   doc,
   query,
   serverTimestamp,
@@ -71,6 +73,16 @@ import {
 } from "../firebaseUsage";
 
 import { auth, db } from "../firebase";
+import Dokumentablage from "../components/Dokumentablage";
+import {
+  VERHANDLUNG_DOKUMENT_KATEGORIEN,
+  addiereTage,
+  alleDokumenteLoeschen,
+  dokumentFristenSynchronisieren,
+  istAbgeschlossenerStatus,
+  timestampZuDatum,
+  verhandlungsFristInitialisieren,
+} from "../services/dokumente";
 
 const leerVerhandlungsFormular = {
   auftraggeberId: "",
@@ -244,6 +256,7 @@ export default function Verhandlungen({
 
   const [ansicht, setAnsicht] = useState("verhandlungen");
   const initialNegotiationOpenedRef = useRef("");
+  const initialisierteDokumentFristenRef = useRef(new Set());
 
   const [verhandlungen, setVerhandlungen] = useState([]);
   const [verhandlungsFormular, setVerhandlungsFormular] = useState(
@@ -398,6 +411,20 @@ export default function Verhandlungen({
       fahrzeugAbmelden();
     };
   }, []);
+
+  useEffect(() => {
+    verhandlungen
+      .filter((eintrag) => istAbgeschlossenerStatus(statusNormalisieren(eintrag.status)))
+      .forEach((eintrag) => {
+        if (initialisierteDokumentFristenRef.current.has(eintrag.id)) return;
+        initialisierteDokumentFristenRef.current.add(eintrag.id);
+        verhandlungsFristInitialisieren(eintrag).catch((error) => {
+          console.error(error);
+          initialisierteDokumentFristenRef.current.delete(eintrag.id);
+          setFehler("Die Aufbewahrungsfrist der Verhandlungsdokumente konnte nicht geprüft werden.");
+        });
+      });
+  }, [verhandlungen]);
 
   const kennzahlen = useMemo(() => {
     const offen = verhandlungen.filter(
@@ -724,10 +751,20 @@ eintrag.status !== "Verloren"
     setSpeichert(true);
     setFehler("");
 
+    const status = statusNormalisieren(verhandlungsFormular.status);
+    const istBeendet = istAbgeschlossenerStatus(status);
+    const bisherigerEintrag = verhandlungen.find(
+      (eintrag) => eintrag.id === verhandlungsBearbeitungsId
+    );
+    const vorhandeneFrist = timestampZuDatum(bisherigerEintrag?.dokumentLoeschdatum);
+    const dokumentLoeschdatum = istBeendet
+      ? (vorhandeneFrist || addiereTage(new Date()))
+      : null;
+
     const daten = {
-  ...verhandlungsFormular,
-  status: statusNormalisieren(verhandlungsFormular.status),
-  firma: verhandlungsFormular.firma.trim(),
+      ...verhandlungsFormular,
+      status,
+      firma: verhandlungsFormular.firma.trim(),
       auftraggeberName: verhandlungsFormular.auftraggeberName.trim(),
       verhandlungsgegenstand:
         verhandlungsFormular.verhandlungsgegenstand.trim(),
@@ -739,18 +776,33 @@ eintrag.status !== "Verloren"
       geaendertAm: serverTimestamp(),
     };
 
+    if (istBeendet) {
+      daten.abgeschlossenAm = bisherigerEintrag?.abgeschlossenAm || serverTimestamp();
+      daten.dokumentLoeschdatum = Timestamp.fromDate(dokumentLoeschdatum);
+    } else if (verhandlungsBearbeitungsId) {
+      daten.abgeschlossenAm = deleteField();
+      daten.dokumentLoeschdatum = deleteField();
+    }
+
     try {
+      let gespeicherteId = verhandlungsBearbeitungsId;
       if (verhandlungsBearbeitungsId) {
         await updateDoc(
           doc(db, "verhandlungen", verhandlungsBearbeitungsId),
           daten
         );
       } else {
-        await addDoc(collection(db, "verhandlungen"), {
+        const ref = await addDoc(collection(db, "verhandlungen"), {
           ...daten,
           erstelltAm: serverTimestamp(),
         });
+        gespeicherteId = ref.id;
       }
+
+      await dokumentFristenSynchronisieren(
+        gespeicherteId,
+        dokumentLoeschdatum
+      );
 
       setVerhandlungsDialogOffen(false);
       setVerhandlungsFormular(leerVerhandlungsFormular);
@@ -843,6 +895,7 @@ eintrag.status !== "Verloren"
       return;
 
     try {
+      await alleDokumenteLoeschen("verhandlung", eintrag.id);
       await deleteDoc(doc(db, "verhandlungen", eintrag.id));
     } catch (error) {
       console.error(error);
@@ -2299,6 +2352,38 @@ eintrag.status !== "Verloren"
                 value={verhandlungsFormular.notizen}
                 onChange={verhandlungsFeldAendern}
               />
+            </Grid>
+            <Grid size={{ xs: 12 }}>
+              {verhandlungsBearbeitungsId ? (
+                <Accordion defaultExpanded={false} disableGutters>
+                  <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                    <Box>
+                      <Typography fontWeight={850}>Dokumente der Verhandlung</Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        Angebote, Vereinbarungen und weitere Dateien direkt zuordnen
+                      </Typography>
+                    </Box>
+                  </AccordionSummary>
+                  <AccordionDetails>
+                    <Dokumentablage
+                      ownerType="verhandlung"
+                      ownerId={verhandlungsBearbeitungsId}
+                      ownerLabel={verhandlungsFormular.firma}
+                      categories={VERHANDLUNG_DOKUMENT_KATEGORIEN}
+                      deleteAfter={
+                        verhandlungen.find(
+                          (eintrag) => eintrag.id === verhandlungsBearbeitungsId
+                        )?.dokumentLoeschdatum
+                      }
+                      compact
+                    />
+                  </AccordionDetails>
+                </Accordion>
+              ) : (
+                <Alert severity="info">
+                  Die Dokumentablage ist nach dem ersten Speichern der Verhandlung verfügbar.
+                </Alert>
+              )}
             </Grid>
           </Grid>
         </DialogContent>
