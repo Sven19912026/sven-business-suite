@@ -382,7 +382,7 @@ function Login() {
           </Box>
           <Box>
             <Typography variant="h6" lineHeight={1.15}>Sven Business Suite</Typography>
-            <Typography variant="caption" sx={{ opacity: 0.72, letterSpacing: '.08em' }}>VERSION 5.1</Typography>
+            <Typography variant="caption" sx={{ opacity: 0.72, letterSpacing: '.08em' }}>VERSION 5.2</Typography>
           </Box>
         </Stack>
 
@@ -420,7 +420,7 @@ function Login() {
           </Box>
           <Box>
             <Typography fontWeight={850} lineHeight={1.1}>Sven Business Suite</Typography>
-            <Typography variant="caption" color="text.secondary">Version 5.1</Typography>
+            <Typography variant="caption" color="text.secondary">Version 5.2</Typography>
           </Box>
         </Stack>
 
@@ -676,7 +676,7 @@ function Dashboard({ user, openPage }) {
         <Box sx={{ position: 'relative', display: 'grid', gridTemplateColumns: { xs: '1fr', lg: 'minmax(0, 1fr) 320px' }, gap: 4, alignItems: 'center' }}>
           <Box sx={{ maxWidth: 760 }}>
             <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1.5 }}>
-              <Chip size="small" label="BUSINESS SUITE 5.1" sx={{ color: '#dbe8ff', bgcolor: 'rgba(255,255,255,.12)', border: '1px solid rgba(255,255,255,.14)' }} />
+              <Chip size="small" label="BUSINESS SUITE 5.2" sx={{ color: '#dbe8ff', bgcolor: 'rgba(255,255,255,.12)', border: '1px solid rgba(255,255,255,.14)' }} />
               <Typography variant="caption" sx={{ opacity: 0.68 }}>{formatDate(today, { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })}</Typography>
             </Stack>
             <Typography variant="h3" sx={{ fontSize: { xs: '2rem', sm: '2.55rem', lg: '3rem' } }}>
@@ -939,7 +939,7 @@ function NavigationContent({ page, setPage, user, logout, closeMobile, mobile = 
           </Box>
           <Box sx={{ minWidth: 0 }}>
             <Typography fontWeight={880} lineHeight={1.1} noWrap>Sven Business</Typography>
-            <Typography variant="caption" color="text.secondary" sx={{ letterSpacing: '.08em' }}>SUITE 5.1</Typography>
+            <Typography variant="caption" color="text.secondary" sx={{ letterSpacing: '.08em' }}>SUITE 5.2</Typography>
           </Box>
         </Stack>
         {mobile && (
@@ -1138,7 +1138,7 @@ function AuthenticatedArea({ user, colorMode, toggleColorMode }) {
   }
 
   useEffect(() => {
-    document.title = `${page} | Sven Business Suite 5.1`
+    document.title = `${page} | Sven Business Suite 5.2`
   }, [page])
 
   async function logout() {

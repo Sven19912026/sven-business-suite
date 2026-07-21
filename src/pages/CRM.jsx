@@ -67,7 +67,7 @@ import { GlobalWorkerOptions, getDocument } from "pdfjs-dist";
 import pdfWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { auth, db } from "../firebase";
 import Dokumentablage from "../components/Dokumentablage";
-import { alleDokumenteLoeschen } from "../services/dokumente";
+import { alleDokumenteLoeschen, VERTRAG_DOKUMENT_KATEGORIEN } from "../services/dokumente";
 
 GlobalWorkerOptions.workerSrc = pdfWorker;
 
@@ -920,6 +920,8 @@ delete vertragsFormularDaten._sourceCollection;
   async function vertragLoeschen(vertrag) {
     if (!window.confirm(`Vertrag „${vertrag.name}“ wirklich löschen?`)) return;
     try {
+      const dokumentOwnerType = vertrag._sourceCollection === "vertraege" ? "crmVertrag" : "vertrag";
+      await alleDokumenteLoeschen(dokumentOwnerType, vertrag.id);
       await deleteDoc(
         doc(
           db,
@@ -1371,6 +1373,18 @@ delete vertragsFormularDaten._sourceCollection;
                       <Grid size={{ xs: 12, sm: 6 }}><Typography color="text.secondary">Erinnerungen</Typography><Typography>{vertrag.erinnerungAktiv === false ? "Aus" : `An · ${erinnerungsTage(vertrag).join(", ")} Tage vorher`}</Typography></Grid>
                       <Grid size={{ xs: 12, sm: 6 }}><Typography color="text.secondary">Ansprechpartner</Typography><Typography>{vertrag.ansprechpartner || "—"}</Typography></Grid>
                       {vertrag.notizen && <Grid size={{ xs: 12 }}><Typography color="text.secondary">Notizen</Typography><Typography sx={{ whiteSpace: "pre-wrap" }}>{vertrag.notizen}</Typography></Grid>}
+                      <Grid size={{ xs: 12 }}>
+                        <Divider sx={{ mb: 2 }} />
+                        <Dokumentablage
+                          ownerType={vertrag._sourceCollection === "vertraege" ? "crmVertrag" : "vertrag"}
+                          ownerId={vertrag.id}
+                          ownerLabel={`${auswahl.firma} – ${vertrag.name}`}
+                          title="Vertragsdokumente"
+                          description="Vertrag, Nachträge, Kündigungen und Anlagen direkt diesem Vertrag zuordnen."
+                          categories={VERTRAG_DOKUMENT_KATEGORIEN}
+                          compact
+                        />
+                      </Grid>
                     </Grid>
                   </Collapse>
                 </Paper>;

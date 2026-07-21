@@ -1,4 +1,4 @@
-name: Deploy Business Suite 5.1
+name: Deploy Business Suite 5.2
 
 on:
   push:

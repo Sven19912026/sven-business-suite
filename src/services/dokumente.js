@@ -22,6 +22,15 @@ export const DOKUMENT_KATEGORIEN = [
   "Sonstiges",
 ];
 
+export const VERTRAG_DOKUMENT_KATEGORIEN = [
+  "Vertrag",
+  "Nachtrag",
+  "Kündigung",
+  "Anlage",
+  "Korrespondenz",
+  "Sonstiges",
+];
+
 export const VERHANDLUNG_DOKUMENT_KATEGORIEN = [
   "Angebote",
   "Verträge",
@@ -51,7 +60,13 @@ export function timestampZuDatum(wert) {
 }
 
 export function dokumenteCollection(ownerType, ownerId) {
-  const sammlung = ownerType === "verhandlung" ? "verhandlungen" : "lieferanten";
+  const sammlungNachTyp = {
+    lieferant: "lieferanten",
+    verhandlung: "verhandlungen",
+    vertrag: "suiteVertraege",
+    crmVertrag: "vertraege",
+  };
+  const sammlung = sammlungNachTyp[ownerType] || "lieferanten";
   return collection(db, sammlung, ownerId, "dokumente");
 }
 

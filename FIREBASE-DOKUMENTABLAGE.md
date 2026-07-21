@@ -1,13 +1,18 @@
 # Firebase-Dokumentablage – Einrichtung und Status
 
-Business Suite 5.1 verwendet weiterhin dieselbe Firebase-Struktur wie Version 5.0:
+Business Suite 5.2 speichert Dokumente getrennt nach ihrem fachlichen Bezug:
 
-- Dateien: `business-suite/{userId}/{ownerType}/{ownerId}/...` in Firebase Storage
-- Metadaten: Unterkollektion `dokumente` beim jeweiligen Lieferanten oder bei der jeweiligen Verhandlung
+- Allgemeine Lieferantendokumente: `lieferanten/{lieferantId}/dokumente`
+- Vertragsdokumente: `suiteVertraege/{vertragId}/dokumente`
+- Kompatibilität für ältere CRM-Verträge: `vertraege/{vertragId}/dokumente`
+- Verhandlungsdokumente: `verhandlungen/{verhandlungId}/dokumente`
+- Dateien in Storage: `business-suite/{userId}/{ownerType}/{ownerId}/...`
 
-Die zusätzlichen Felder für Titel, Beschreibung, Tags und Volltextindex liegen im bestehenden Dokument-Metadatensatz. Dafür sind keine neuen Regeln erforderlich.
+Der allgemeine Lieferanten-Reiter „Dokumente“ bleibt unabhängig von den Vertragsdokumenten bestehen.
 
 ## Storage-Regel
+
+Die bestehende generische Storage-Regel unterstützt auch Vertragsdokumente ohne Änderung:
 
 ```text
 match /business-suite/{userId}/{ownerType}/{ownerId}/{fileName} {
@@ -19,17 +24,19 @@ match /business-suite/{userId}/{ownerType}/{ownerId}/{fileName} {
 }
 ```
 
-## Firestore-Regel
+## Firestore-Regeln bei einer später restriktiven Konfiguration
+
+Das aktuell eingerichtete Projekt besitzt weiterhin einen allgemeinen Zugriff für angemeldete Benutzer und benötigt deshalb für dieses Update keine Regeländerung. Falls diese allgemeine Regel später entfernt wird, ergänze zusätzlich:
 
 ```text
-match /lieferanten/{lieferantId}/dokumente/{dokumentId} {
+match /suiteVertraege/{vertragId}/dokumente/{dokumentId} {
   allow create: if request.auth != null
     && request.resource.data.userId == request.auth.uid;
   allow read, update, delete: if request.auth != null
     && resource.data.userId == request.auth.uid;
 }
 
-match /verhandlungen/{verhandlungId}/dokumente/{dokumentId} {
+match /vertraege/{vertragId}/dokumente/{dokumentId} {
   allow create: if request.auth != null
     && request.resource.data.userId == request.auth.uid;
   allow read, update, delete: if request.auth != null
@@ -37,12 +44,20 @@ match /verhandlungen/{verhandlungId}/dokumente/{dokumentId} {
 }
 ```
 
+Die bereits vorhandenen Regeln für Lieferanten- und Verhandlungsdokumente bleiben bestehen.
+
+## Löschen von Verträgen
+
+Beim Löschen eines Vertrags entfernt die App zuerst alle zugehörigen Dateien aus Firebase Storage und danach die Dokument-Metadaten aus Firestore. Anschließend wird der Vertrag selbst gelöscht.
+
 ## Automatische 30-Tage-Löschung
 
-Die bereits bereitgestellte Function bleibt unverändert:
+Die 30-Tage-Löschung gilt weiterhin ausschließlich für Dokumente abgeschlossener oder verlorener Verhandlungen. Vertragsdokumente werden nicht automatisch nach 30 Tagen gelöscht.
+
+Die bestehende Function bleibt unverändert:
 
 ```bash
 firebase deploy --only functions:cleanupExpiredNegotiationDocuments
 ```
 
-Eine erneute Bereitstellung ist für das Update auf 5.1 nicht notwendig, wenn das Deployment von Version 5.0 erfolgreich abgeschlossen wurde.
+Eine erneute Bereitstellung ist für Business Suite 5.2 nicht notwendig.

@@ -98,6 +98,8 @@ export default function Dokumentablage({
   ownerType,
   ownerId,
   ownerLabel,
+  title = "Dokumentablage",
+  description = "Drag & Drop, mobile Kamera, Tags, Volltextsuche und PDF-Vorschau.",
   categories = DOKUMENT_KATEGORIEN,
   deleteAfter = null,
   compact = false,
@@ -394,10 +396,10 @@ export default function Dokumentablage({
       <Stack spacing={2}>
         <Box>
           <Typography variant={compact ? "subtitle1" : "h6"} fontWeight={850}>
-            Dokumentablage
+            {title}
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            Drag & Drop, mobile Kamera, Tags, Volltextsuche und PDF-Vorschau.
+            {description}
           </Typography>
         </Box>
 

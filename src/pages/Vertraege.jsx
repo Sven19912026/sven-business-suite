@@ -13,6 +13,7 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  Divider,
   FormControlLabel,
   IconButton,
   MenuItem,
@@ -28,6 +29,7 @@ import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh'
 import CloudUploadIcon from '@mui/icons-material/CloudUpload'
 import DeleteIcon from '@mui/icons-material/Delete'
 import DescriptionIcon from '@mui/icons-material/Description'
+import AttachFileIcon from '@mui/icons-material/AttachFile'
 import EditIcon from '@mui/icons-material/Edit'
 import EuroIcon from '@mui/icons-material/Euro'
 import EventBusyIcon from '@mui/icons-material/EventBusy'
@@ -51,6 +53,8 @@ import {
 import { GlobalWorkerOptions, getDocument } from 'pdfjs-dist'
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import { auth, db } from '../firebase'
+import Dokumentablage from '../components/Dokumentablage'
+import { alleDokumenteLoeschen, VERTRAG_DOKUMENT_KATEGORIEN } from '../services/dokumente'
 
 GlobalWorkerOptions.workerSrc = pdfWorker
 
@@ -521,6 +525,7 @@ export default function Vertraege() {
   const [lieferantDialogOffen, setLieferantDialogOffen] = useState(false)
   const [lieferantForm, setLieferantForm] = useState(LEERER_LIEFERANT)
   const [offeneLieferanten, setOffeneLieferanten] = useState({})
+  const [offeneDokumente, setOffeneDokumente] = useState({})
 
   const [importDialogOffen, setImportDialogOffen] = useState(false)
   const [importLaedt, setImportLaedt] = useState(false)
@@ -890,6 +895,7 @@ export default function Vertraege() {
   async function vertragLoeschen(vertrag) {
     if (!window.confirm(`Vertrag „${vertrag.name}“ wirklich löschen?`)) return
     try {
+      await alleDokumenteLoeschen("vertrag", vertrag.id)
       await deleteDoc(doc(db, 'suiteVertraege', vertrag.id))
     } catch (error) {
       console.error(error)
@@ -908,10 +914,10 @@ export default function Vertraege() {
       <Paper sx={{ p: { xs: 2.5, sm: 3 } }}>
         <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" gap={2}>
           <Box>
-            <Typography variant="overline" color="primary" fontWeight={800}>Business Suite 5.1</Typography>
+            <Typography variant="overline" color="primary" fontWeight={800}>Business Suite 5.2</Typography>
             <Typography variant="h4" fontWeight={800}>Vertragsverwaltung</Typography>
             <Typography color="text.secondary" mt={0.5}>
-              Lieferanten anlegen und darunter mehrere Verträge wie Rahmenverträge oder Nachträge verwalten. PDFs werden nur lokal ausgelesen und nicht gespeichert.
+              Lieferanten anlegen, Verträge verwalten und Vertragsdateien direkt am jeweiligen Vertrag in Firebase ablegen. Der PDF-Import liest Dateien weiterhin nur lokal aus.
             </Typography>
           </Box>
           <Stack direction={{ xs: 'column', sm: 'row' }} gap={1}>
@@ -997,10 +1003,30 @@ export default function Vertraege() {
                               {vertrag.notizen && <Typography variant="body2" mt={2}><strong>Notiz:</strong> {vertrag.notizen}</Typography>}
                             </Box>
                             <Stack direction="row" alignSelf={{ xs: 'flex-end', md: 'flex-start' }}>
+                              <Tooltip title="Vertragsdokumente">
+                                <IconButton
+                                  color={offeneDokumente[vertrag.id] ? 'primary' : 'default'}
+                                  onClick={() => setOffeneDokumente((vorher) => ({ ...vorher, [vertrag.id]: !vorher[vertrag.id] }))}
+                                >
+                                  <AttachFileIcon />
+                                </IconButton>
+                              </Tooltip>
                               <Tooltip title="Bearbeiten"><IconButton onClick={() => vertragBearbeiten(vertrag)}><EditIcon /></IconButton></Tooltip>
                               <Tooltip title="Löschen"><IconButton color="error" onClick={() => vertragLoeschen(vertrag)}><DeleteIcon /></IconButton></Tooltip>
                             </Stack>
                           </Stack>
+                          <Collapse in={Boolean(offeneDokumente[vertrag.id])} timeout="auto" unmountOnExit>
+                            <Divider sx={{ my: 2 }} />
+                            <Dokumentablage
+                              ownerType="vertrag"
+                              ownerId={vertrag.id}
+                              ownerLabel={`${lieferant.firma} – ${vertrag.name}`}
+                              title="Vertragsdokumente"
+                              description="Vertrag, Nachträge, Kündigungen und Anlagen direkt diesem Vertrag zuordnen."
+                              categories={VERTRAG_DOKUMENT_KATEGORIEN}
+                              compact
+                            />
+                          </Collapse>
                         </CardContent>
                       </Card>
                     )

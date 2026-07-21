@@ -478,7 +478,7 @@ export default function Aufgaben() {
       <Paper sx={{ p: { xs: 2.5, sm: 3 } }}>
         <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" gap={2}>
           <Box>
-            <Typography variant="overline" color="primary" fontWeight={800}>Business Suite 5.1</Typography>
+            <Typography variant="overline" color="primary" fontWeight={800}>Business Suite 5.2</Typography>
             <Typography variant="h4" fontWeight={800}>Aufgaben</Typography>
             <Typography color="text.secondary" mt={0.5}>Aufgaben für Arbeit und Privat getrennt planen, priorisieren und verwalten.</Typography>
           </Box>
