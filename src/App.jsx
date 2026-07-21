@@ -204,11 +204,12 @@ const navigation = [
     icon: HandshakeRoundedIcon,
     description: 'Angebote und Ergebnisse',
   },
-  {
-    title: 'CRM',
-    icon: BusinessRoundedIcon,
-    description: 'Firmen und Kontakte',
-  },
+{
+  title: 'Dienstleister und Lieferanten',
+  page: 'CRM',
+  icon: BusinessRoundedIcon,
+  description: 'Firmen, Kontakte und Verträge',
+},
   {
     title: 'Mitarbeiter',
     icon: GroupsRoundedIcon,
@@ -217,7 +218,7 @@ const navigation = [
 ]
 
 const pageMeta = Object.fromEntries(
-  navigation.map((item) => [item.title, item]),
+  navigation.map((item) => [item.page || item.title, item]),
 )
 
 const moduleCards = [
@@ -252,10 +253,11 @@ const moduleCards = [
     soft: '#fff4e6',
   },
   {
-    title: 'CRM',
+    title: 'Dienstleister und Lieferanten',
+    page: 'CRM',
     icon: BusinessRoundedIcon,
     eyebrow: 'Kontakte',
-    description: 'Firmen, Kontakte, Aufgaben und Vorgänge in einer gemeinsamen Ansicht pflegen.',
+    description: 'Dienstleister, Lieferanten, Kontakte, Aufgaben und Vorgänge in einer gemeinsamen Ansicht pflegen.',
     sourceKey: 'suppliers',
     countLabel: 'aktiv',
     accent: '#0f766e',
@@ -555,7 +557,7 @@ function WorkAreas({ data, counts, openPage }) {
               key={item.title}
               component="button"
               type="button"
-              onClick={() => openPage(item.title)}
+              onClick={() => openPage(item.page || item.title)}
               elevation={0}
               sx={{
                 p: 2.6,
@@ -710,15 +712,85 @@ function Dashboard({ user, openPage }) {
           <Paper elevation={0} sx={{ display: { xs: 'none', lg: 'block' }, p: 2.5, bgcolor: 'rgba(9, 31, 73, .34)', color: 'white', border: '1px solid rgba(255,255,255,.13)', backdropFilter: 'blur(10px)' }}>
             <Typography variant="overline" sx={{ opacity: 0.65 }}>HEUTE IM BLICK</Typography>
             <Stack spacing={1.25} sx={{ mt: 1.25 }}>
-              <Stack direction="row" justifyContent="space-between" alignItems="center">
-                <Typography sx={{ opacity: 0.78, lineHeight: 1.2 }}>Offene Aufgaben</Typography>
-                <Typography variant="h5" sx={{ minWidth: 42, textAlign: 'right', lineHeight: 1.15, m: 0 }}>{data.tasks.status === 'ready' ? openTasks.length : '–'}</Typography>
-              </Stack>
-              <Divider sx={{ borderColor: 'rgba(255,255,255,.12)' }} />
-              <Stack direction="row" justifyContent="space-between" alignItems="center">
-                <Typography sx={{ opacity: 0.78, lineHeight: 1.2 }}>Überfällig</Typography>
-                <Typography variant="h5" sx={{ minWidth: 42, textAlign: 'right', lineHeight: 1.15, m: 0 }} color={overdueTasks.length ? '#ffd0c8' : 'inherit'}>{data.tasks.status === 'ready' ? overdueTasks.length : '–'}</Typography>
-              </Stack>
+             <Box
+  sx={{
+    display: 'grid',
+    gridTemplateColumns: 'minmax(0, 1fr) 52px',
+    alignItems: 'center',
+    columnGap: 2,
+    minHeight: 42,
+  }}
+>
+  <Typography
+    sx={{
+      opacity: 0.78,
+      lineHeight: 1.25,
+    }}
+  >
+    Offene Aufgaben
+  </Typography>
+
+  <Typography
+    component="span"
+    sx={{
+      width: 52,
+      height: 42,
+      display: 'grid',
+      placeItems: 'center end',
+      fontSize: '1.5rem',
+      fontWeight: 850,
+      lineHeight: 1,
+      letterSpacing: '-0.02em',
+      fontVariantNumeric: 'tabular-nums',
+      m: 0,
+      p: 0,
+    }}
+  >
+    {data.tasks.status === 'ready' ? openTasks.length : '–'}
+  </Typography>
+</Box>
+
+<Divider sx={{ borderColor: 'rgba(255,255,255,.12)' }} />
+
+<Box
+  sx={{
+    display: 'grid',
+    gridTemplateColumns: 'minmax(0, 1fr) 52px',
+    alignItems: 'center',
+    columnGap: 2,
+    minHeight: 42,
+  }}
+>
+  <Typography
+    sx={{
+      opacity: 0.78,
+      lineHeight: 1.25,
+    }}
+  >
+    Überfällig
+  </Typography>
+
+  <Typography
+    component="span"
+    color={overdueTasks.length ? '#ffd0c8' : 'inherit'}
+    sx={{
+      width: 52,
+      height: 42,
+      display: 'grid',
+      placeItems: 'center end',
+      fontSize: '1.5rem',
+      fontWeight: 850,
+      lineHeight: 1,
+      letterSpacing: '-0.02em',
+      fontVariantNumeric: 'tabular-nums',
+      m: 0,
+      p: 0,
+    }}
+  >
+    {data.tasks.status === 'ready' ? overdueTasks.length : '–'}
+  </Typography>
+</Box>
+ 
               <Divider sx={{ borderColor: 'rgba(255,255,255,.12)' }} />
               <Stack direction="row" spacing={1} alignItems="center">
                 <CloudDoneRoundedIcon sx={{ color: '#9edbc8' }} />
@@ -855,12 +927,12 @@ function NavigationContent({ page, setPage, user, logout, closeMobile, mobile = 
       <List sx={{ px: 1.35, py: 0.5 }}>
         {navigation.map((item) => {
           const Icon = item.icon
-          const selected = page === item.title
+          const selected = page === (item.page || item.title)
           return (
             <ListItemButton
               key={item.title}
               selected={selected}
-              onClick={() => choose(item.title)}
+              onClick={() => choose(item.page || item.title)}
               sx={{
                 position: 'relative',
                 mb: 0.45,
@@ -947,7 +1019,7 @@ function FixedHeader({ page, user, openMobileNavigation, logout, colorMode, togg
 
         <Box sx={{ flexGrow: 1, minWidth: 0 }}>
           <Typography variant="caption" color="text.secondary" sx={{ display: { xs: 'none', sm: 'block' }, fontWeight: 750 }}>
-            Sven Business Suite / {page}
+            Sven Business Suite / {current.title}
           </Typography>
           <Typography variant="h6" noWrap sx={{ fontSize: { xs: '1rem', sm: '1.18rem' } }}>{current.title}</Typography>
         </Box>
