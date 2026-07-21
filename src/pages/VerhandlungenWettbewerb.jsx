@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+﻿import { useEffect, useMemo, useState } from 'react'
 import {
   Alert,
   Box,
@@ -169,6 +169,10 @@ function billigsterAnbieter(anbieter = []) {
   )
 }
 
+function statusIstAbgeschlossen(status) {
+  return status === 'Abgeschlossen' || status === 'Gewonnen'
+}
+
 function statusFarbe(status) {
   if (statusIstAbgeschlossen(status)) return "success";
   if (status === "Verloren") return "error";
@@ -249,7 +253,7 @@ export default function VerhandlungenWettbewerb() {
         console.error(error)
 
         setFehler(
-          'Wettbewerbe konnten nicht geladen werden. Prüfe die Firestore-Regeln.',
+          'Wettbewerbe konnten nicht geladen werden. PrÃ¼fe die Firestore-Regeln.',
         )
 
         setLaden(false)
@@ -473,7 +477,7 @@ export default function VerhandlungenWettbewerb() {
 
     if (!titel) {
       setFehler(
-        'Bitte einen Namen für den Wettbewerb eintragen.',
+        'Bitte einen Namen fÃ¼r den Wettbewerb eintragen.',
       )
       return
     }
@@ -486,7 +490,7 @@ export default function VerhandlungenWettbewerb() {
 
     if (gueltigeAnbieter.length < 2) {
       setFehler(
-        'Bitte mindestens zwei Anbieter für den Wettbewerb eintragen.',
+        'Bitte mindestens zwei Anbieter fÃ¼r den Wettbewerb eintragen.',
       )
       return
     }
@@ -599,7 +603,7 @@ export default function VerhandlungenWettbewerb() {
       console.error(error)
 
       setFehler(
-        'Der Wettbewerb konnte nicht gespeichert werden. Prüfe die Firestore-Regeln.',
+        'Der Wettbewerb konnte nicht gespeichert werden. PrÃ¼fe die Firestore-Regeln.',
       )
     } finally {
       setSpeichert(false)
@@ -608,7 +612,7 @@ export default function VerhandlungenWettbewerb() {
 
   async function loeschen(wettbewerb) {
     const bestaetigt = window.confirm(
-      `Wettbewerb „${wettbewerb.titel}“ wirklich löschen?`,
+      `Wettbewerb â€ž${wettbewerb.titel}â€œ wirklich lÃ¶schen?`,
     )
 
     if (!bestaetigt) {
@@ -627,7 +631,7 @@ export default function VerhandlungenWettbewerb() {
       console.error(error)
 
       setFehler(
-        'Der Wettbewerb konnte nicht gelöscht werden.',
+        'Der Wettbewerb konnte nicht gelÃ¶scht werden.',
       )
     }
   }
@@ -656,7 +660,7 @@ export default function VerhandlungenWettbewerb() {
             variant="h4"
             fontWeight={850}
           >
-            Verhandlungen – Wettbewerb
+            Verhandlungen â€“ Wettbewerb
           </Typography>
 
           <Typography color="text.secondary">
@@ -704,7 +708,7 @@ export default function VerhandlungenWettbewerb() {
 
       {laden ? (
         <Typography>
-          Wettbewerbe werden geladen …
+          Wettbewerbe werden geladen â€¦
         </Typography>
       ) : gefilterteWettbewerbe.length ===
         0 ? (
@@ -822,7 +826,7 @@ export default function VerhandlungenWettbewerb() {
                           </IconButton>
                         </Tooltip>
 
-                        <Tooltip title="Löschen">
+                        <Tooltip title="LÃ¶schen">
                           <IconButton
                             color="error"
                             onClick={() =>
@@ -930,7 +934,7 @@ export default function VerhandlungenWettbewerb() {
                                           icon={
                                             <EmojiEventsIcon />
                                           }
-                                          label="Günstigster"
+                                          label="GÃ¼nstigster"
                                         />
                                       )}
 
@@ -1001,13 +1005,13 @@ export default function VerhandlungenWettbewerb() {
                                   <TableCell>
                                     {eintrag.lieferzeit
                                       ? `${eintrag.lieferzeit} Tage`
-                                      : '—'}
+                                      : 'â€”'}
                                   </TableCell>
 
                                   <TableCell>
                                     {eintrag.zahlungsziel
                                       ? `${eintrag.zahlungsziel} Tage`
-                                      : '—'}
+                                      : 'â€”'}
                                   </TableCell>
                                 </TableRow>
                               )
@@ -1060,14 +1064,14 @@ export default function VerhandlungenWettbewerb() {
                           color="text.secondary"
                           fontWeight={800}
                         >
-                          VERGABEBEGRÜNDUNG
+                          VERGABEBEGRÃœNDUNG
                         </Typography>
 
                         <Typography
                           sx={{ mt: 0.5 }}
                         >
                           {wettbewerb.vergabeBegruendung ||
-                            'Noch keine Begründung hinterlegt.'}
+                            'Noch keine BegrÃ¼ndung hinterlegt.'}
                         </Typography>
                       </Paper>
                     </Box>
@@ -1136,8 +1140,8 @@ export default function VerhandlungenWettbewerb() {
                   Offen
                 </MenuItem>
 
-                <MenuItem value="In Prüfung">
-                  In Prüfung
+                <MenuItem value="In PrÃ¼fung">
+                  In PrÃ¼fung
                 </MenuItem>
 
                 <MenuItem value="Abgeschlossen">
@@ -1193,7 +1197,7 @@ export default function VerhandlungenWettbewerb() {
                   anbieterHinzufuegen
                 }
               >
-                Anbieter hinzufügen
+                Anbieter hinzufÃ¼gen
               </Button>
             </Stack>
 
@@ -1246,7 +1250,7 @@ export default function VerhandlungenWettbewerb() {
                             icon={
                               <EmojiEventsIcon />
                             }
-                            label="Aktuell günstigster"
+                            label="Aktuell gÃ¼nstigster"
                           />
                         )}
                       </Stack>
@@ -1583,7 +1587,7 @@ export default function VerhandlungenWettbewerb() {
               <TextField
                 fullWidth
                 name="vergabeBegruendung"
-                label="Vergabebegründung"
+                label="VergabebegrÃ¼ndung"
                 value={
                   formular.vergabeBegruendung
                 }
@@ -1613,7 +1617,7 @@ export default function VerhandlungenWettbewerb() {
             disabled={speichert}
           >
             {speichert
-              ? 'Speichert …'
+              ? 'Speichert â€¦'
               : 'Speichern'}
           </Button>
         </DialogActions>
