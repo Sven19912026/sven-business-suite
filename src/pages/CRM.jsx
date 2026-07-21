@@ -773,10 +773,8 @@ export default function CRM({ onOpenNegotiation }) {
     if (!user || !auswahl || !vertragForm.name.trim()) return;
     setSpeichert(true);
     try {
-      const {
-        _sourceCollection,
-        ...vertragsFormularDaten
-      } = vertragForm;
+      const vertragsFormularDaten = { ...vertragForm };
+delete vertragsFormularDaten._sourceCollection;
 
       const daten = {
         ...vertragsFormularDaten,
