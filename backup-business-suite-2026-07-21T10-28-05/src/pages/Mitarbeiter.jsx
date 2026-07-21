@@ -24,18 +24,16 @@ import EditIcon from '@mui/icons-material/Edit'
 import SearchIcon from '@mui/icons-material/Search'
 import TrendingUpIcon from '@mui/icons-material/TrendingUp'
 import {
+  addDoc,
   collection,
+  deleteDoc,
   doc,
+  onSnapshot,
   orderBy,
   query,
   serverTimestamp,
-} from "firebase/firestore";
-import {
-  trackedAddDoc as addDoc,
-  trackedDeleteDoc as deleteDoc,
-  trackedOnSnapshot as onSnapshot,
-  trackedUpdateDoc as updateDoc,
-} from "../firebaseUsage";
+  updateDoc,
+} from 'firebase/firestore'
 import { auth, db } from '../firebase'
 
 const leer = {

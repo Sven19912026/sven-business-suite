@@ -37,20 +37,18 @@ import AssignmentIcon from '@mui/icons-material/Assignment'
 import HomeOutlinedIcon from '@mui/icons-material/HomeOutlined'
 import WorkIcon from '@mui/icons-material/Work'
 import {
+  addDoc,
   collection,
+  deleteDoc,
   doc,
+  onSnapshot,
   query,
   serverTimestamp,
+  setDoc,
+  updateDoc,
   where,
-} from "firebase/firestore";
-import {
-  trackedAddDoc as addDoc,
-  trackedDeleteDoc as deleteDoc,
-  trackedOnSnapshot as onSnapshot,
-  trackedSetDoc as setDoc,
-  trackedUpdateDoc as updateDoc,
-  trackedWriteBatch as writeBatch,
-} from "../firebaseUsage";
+  writeBatch,
+} from 'firebase/firestore'
 import { auth, db } from '../firebase'
 
 const STANDARD_KATEGORIE = 'Allgemein'
@@ -65,7 +63,7 @@ const LEERE_AUFGABE = {
   faelligAm: '',
   wiederholung: 'Keine',
   erledigt: false,
-  bereich: 'arbeit',
+  bereich: '',
 }
 
 function heuteIso() {
@@ -187,40 +185,6 @@ export default function Aufgaben() {
     return () => { unsubAufgaben(); unsubKategorien() }
   }, [user])
 
-  // Bestehende Aufgaben ohne Bereich werden automatisch Arbeit zugeordnet.
-  useEffect(() => {
-    if (!user) return
-
-    const aufgabenOhneBereich = aufgaben.filter(
-      (aufgabe) => !aufgabe.bereich,
-    )
-
-    if (!aufgabenOhneBereich.length) return
-
-    const batch = writeBatch(db)
-
-    aufgabenOhneBereich.forEach((aufgabe) => {
-      batch.update(
-        doc(db, 'suiteAufgaben', aufgabe.id),
-        {
-          bereich: 'arbeit',
-          aktualisiertAm: serverTimestamp(),
-        },
-      )
-    })
-
-    batch.commit().catch((error) => {
-      console.error(
-        'Aufgabenbereich konnte nicht automatisch ergänzt werden:',
-        error,
-      )
-
-      setFehler(
-        'Bestehende Aufgaben konnten nicht automatisch dem Bereich Arbeit zugeordnet werden.',
-      )
-    })
-  }, [aufgaben, user])
-
   useEffect(() => {
     if (!user) return
 
@@ -261,14 +225,10 @@ export default function Aufgaben() {
   const bereichSchluessel = user ? `sven-suite-aufgaben-bereich-${user.uid}` : ''
   const bereichName = bereich === 'privat' ? 'Privat' : 'Arbeit'
 
-  // Ältere Aufgaben ohne Bereich gelten sofort als Arbeitsaufgaben.
-  // Die dauerhafte Zuordnung erfolgt zusätzlich automatisch in Firestore.
+  // Nur Aufgaben mit einer ausdrücklichen Bereichszuordnung werden angezeigt.
+  // Bestehende Aufgaben ohne "bereich" bleiben unverändert und werden nicht automatisch migriert.
   const bereichAufgaben = useMemo(
-    () =>
-      aufgaben.filter(
-        (aufgabe) =>
-          (aufgabe.bereich || 'arbeit') === bereich,
-      ),
+    () => aufgaben.filter((aufgabe) => aufgabe.bereich === bereich),
     [aufgaben, bereich],
   )
 
@@ -478,7 +438,7 @@ export default function Aufgaben() {
       <Paper sx={{ p: { xs: 2.5, sm: 3 } }}>
         <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" gap={2}>
           <Box>
-            <Typography variant="overline" color="primary" fontWeight={800}>Business Suite 5.0</Typography>
+            <Typography variant="overline" color="primary" fontWeight={800}>Business Suite 4.1</Typography>
             <Typography variant="h4" fontWeight={800}>Aufgaben</Typography>
             <Typography color="text.secondary" mt={0.5}>Aufgaben für Arbeit und Privat getrennt planen, priorisieren und verwalten.</Typography>
           </Box>

@@ -38,6 +38,7 @@ import CloseRoundedIcon from '@mui/icons-material/CloseRounded'
 import CloudDoneRoundedIcon from '@mui/icons-material/CloudDoneRounded'
 import DashboardRoundedIcon from '@mui/icons-material/DashboardRounded'
 import DataUsageRoundedIcon from '@mui/icons-material/DataUsageRounded'
+import DescriptionRoundedIcon from '@mui/icons-material/DescriptionRounded'
 import GroupsRoundedIcon from '@mui/icons-material/GroupsRounded'
 import HandshakeRoundedIcon from '@mui/icons-material/HandshakeRounded'
 import KeyboardArrowRightRoundedIcon from '@mui/icons-material/KeyboardArrowRightRounded'
@@ -243,6 +244,12 @@ const moduleCards = [
     countLabel: 'offen',
     accent: '#2457d6',
     soft: '#eaf0ff',
+  },
+  {
+    
+    icon: DescriptionRoundedIcon,
+    accent: '#7c3aed',
+    soft: '#f2ecff',
   },
   {
     title: 'Verhandlungen',
@@ -842,7 +849,7 @@ function Dashboard({ user, openPage }) {
                     <Box sx={{ flexGrow: 1, minWidth: 0 }}>
                       <Typography fontWeight={780} noWrap>{task.titel || 'Aufgabe ohne Titel'}</Typography>
                       <Typography variant="body2" color="text.secondary" noWrap>
-                        {task.bereich === 'privat' ? 'Privat' : 'Arbeit'} · {categoryNames[task.kategorieId] || 'Allgemein'}{task.verantwortlich ? ` · ${task.verantwortlich}` : ''}
+                        {categoryNames[task.kategorieId] || 'Allgemein'}{task.verantwortlich ? ` · ${task.verantwortlich}` : ''}
                       </Typography>
                     </Box>
                     <DueStatus date={task.faelligAm} />

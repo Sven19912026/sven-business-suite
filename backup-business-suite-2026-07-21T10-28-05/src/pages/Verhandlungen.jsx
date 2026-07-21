@@ -57,18 +57,16 @@ import DirectionsCarIcon from "@mui/icons-material/DirectionsCar";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 
 import {
+  addDoc,
   collection,
+  deleteDoc,
   doc,
+  onSnapshot,
   query,
   serverTimestamp,
+  updateDoc,
   where,
 } from "firebase/firestore";
-import {
-  trackedAddDoc as addDoc,
-  trackedDeleteDoc as deleteDoc,
-  trackedOnSnapshot as onSnapshot,
-  trackedUpdateDoc as updateDoc,
-} from "../firebaseUsage";
 
 import { auth, db } from "../firebase";
 

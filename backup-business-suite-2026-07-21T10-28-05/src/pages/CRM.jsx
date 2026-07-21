@@ -51,18 +51,16 @@ import DescriptionIcon from "@mui/icons-material/Description";
 import SearchIcon from "@mui/icons-material/Search";
 import TaskAltIcon from "@mui/icons-material/TaskAlt";
 import {
+  addDoc,
   collection,
+  deleteDoc,
   doc,
+  onSnapshot,
   query,
   serverTimestamp,
+  updateDoc,
   where,
 } from "firebase/firestore";
-import {
-  trackedAddDoc as addDoc,
-  trackedDeleteDoc as deleteDoc,
-  trackedOnSnapshot as onSnapshot,
-  trackedUpdateDoc as updateDoc,
-} from "../firebaseUsage";
 import { GlobalWorkerOptions, getDocument } from "pdfjs-dist";
 import pdfWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { auth, db } from "../firebase";

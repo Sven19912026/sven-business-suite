@@ -36,18 +36,16 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import FactCheckIcon from '@mui/icons-material/FactCheck'
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf'
 import {
+  addDoc,
   collection,
+  deleteDoc,
   doc,
+  onSnapshot,
   query,
   serverTimestamp,
+  updateDoc,
   where,
-} from "firebase/firestore";
-import {
-  trackedAddDoc as addDoc,
-  trackedDeleteDoc as deleteDoc,
-  trackedOnSnapshot as onSnapshot,
-  trackedUpdateDoc as updateDoc,
-} from "../firebaseUsage";
+} from 'firebase/firestore'
 import { GlobalWorkerOptions, getDocument } from 'pdfjs-dist'
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import { auth, db } from '../firebase'

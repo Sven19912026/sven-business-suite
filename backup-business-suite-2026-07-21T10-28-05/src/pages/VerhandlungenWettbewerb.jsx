@@ -39,18 +39,16 @@ import SearchIcon from '@mui/icons-material/Search'
 import StarIcon from '@mui/icons-material/Star'
 
 import {
+  addDoc,
   collection,
+  deleteDoc,
   doc,
+  onSnapshot,
   query,
   serverTimestamp,
+  updateDoc,
   where,
-} from "firebase/firestore";
-import {
-  trackedAddDoc as addDoc,
-  trackedDeleteDoc as deleteDoc,
-  trackedOnSnapshot as onSnapshot,
-  trackedUpdateDoc as updateDoc,
-} from "../firebaseUsage";
+} from 'firebase/firestore'
 
 import { auth, db } from '../firebase'
 
