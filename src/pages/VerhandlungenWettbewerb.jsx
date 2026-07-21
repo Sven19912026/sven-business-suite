@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   Alert,
   Box,
@@ -213,8 +213,6 @@ export default function VerhandlungenWettbewerb() {
     const benutzer = auth.currentUser
 
     if (!benutzer) {
-      setFehler('Kein Benutzer angemeldet.')
-      setLaden(false)
       return undefined
     }
 
@@ -1625,3 +1623,4 @@ export default function VerhandlungenWettbewerb() {
     </Stack>
   )
 }
+
