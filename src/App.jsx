@@ -43,6 +43,8 @@ import KeyboardArrowRightRoundedIcon from '@mui/icons-material/KeyboardArrowRigh
 import LogoutRoundedIcon from '@mui/icons-material/LogoutRounded'
 import MenuRoundedIcon from '@mui/icons-material/MenuRounded'
 import MoreHorizRoundedIcon from '@mui/icons-material/MoreHorizRounded'
+import DarkModeRoundedIcon from '@mui/icons-material/DarkModeRounded'
+import LightModeRoundedIcon from '@mui/icons-material/LightModeRounded'
 import ShieldRoundedIcon from '@mui/icons-material/ShieldRounded'
 import TaskAltRoundedIcon from '@mui/icons-material/TaskAltRounded'
 import WarningAmberRoundedIcon from '@mui/icons-material/WarningAmberRounded'
@@ -67,106 +69,119 @@ import Vertraege from './pages/Vertraege'
 const drawerWidth = 288
 const headerHeight = 76
 
-const theme = createTheme({
-  palette: {
-    mode: 'light',
-    primary: {
-      main: '#2457d6',
-      dark: '#173c9f',
-      light: '#eaf0ff',
-      contrastText: '#ffffff',
-    },
-    secondary: {
-      main: '#0d9488',
-      dark: '#0f766e',
-      light: '#e6f7f5',
-    },
-    background: {
-      default: '#f4f7fb',
-      paper: '#ffffff',
-    },
-    text: {
-      primary: '#172033',
-      secondary: '#667085',
-    },
-    divider: '#e5eaf2',
-    success: { main: '#16865f' },
-    warning: { main: '#c77a12' },
-    error: { main: '#d14343' },
-  },
-  shape: { borderRadius: 16 },
-  typography: {
-    fontFamily: 'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-    h2: { fontWeight: 850, letterSpacing: '-0.055em' },
-    h3: { fontWeight: 850, letterSpacing: '-0.045em' },
-    h4: { fontWeight: 820, letterSpacing: '-0.035em' },
-    h5: { fontWeight: 800, letterSpacing: '-0.025em' },
-    h6: { fontWeight: 780, letterSpacing: '-0.015em' },
-    button: { textTransform: 'none', fontWeight: 750 },
-    overline: { fontWeight: 800, letterSpacing: '0.12em' },
-  },
-  components: {
-    MuiCssBaseline: {
-      styleOverrides: {
-        body: {
-          backgroundColor: '#f4f7fb',
-        },
+function createAppTheme(mode) {
+  const dark = mode === 'dark'
+
+  return createTheme({
+    palette: {
+      mode,
+      primary: {
+        main: dark ? '#7da2ff' : '#2457d6',
+        dark: dark ? '#a9c0ff' : '#173c9f',
+        light: dark ? '#1d315f' : '#eaf0ff',
+        contrastText: dark ? '#0d1730' : '#ffffff',
       },
-    },
-    MuiPaper: {
-      styleOverrides: {
-        root: { backgroundImage: 'none' },
+      secondary: {
+        main: dark ? '#5fd2c7' : '#0d9488',
+        dark: dark ? '#8de0d8' : '#0f766e',
+        light: dark ? '#153c3b' : '#e6f7f5',
       },
-    },
-    MuiCard: {
-      styleOverrides: {
-        root: {
-          borderColor: '#e4e9f1',
-          boxShadow: '0 1px 2px rgba(16, 24, 40, 0.02)',
-        },
+      background: {
+        default: dark ? '#0e1420' : '#f4f7fb',
+        paper: dark ? '#171f2d' : '#ffffff',
       },
+      text: {
+        primary: dark ? '#edf2fb' : '#172033',
+        secondary: dark ? '#a9b4c7' : '#667085',
+      },
+      divider: dark ? '#2a3547' : '#e5eaf2',
+      success: { main: dark ? '#57c79c' : '#16865f' },
+      warning: { main: dark ? '#f0b45d' : '#c77a12' },
+      error: { main: dark ? '#ff8585' : '#d14343' },
     },
-    MuiButton: {
-      styleOverrides: {
-        root: {
-          minHeight: 42,
-          borderRadius: 12,
-          boxShadow: 'none',
-        },
-        contained: {
-          boxShadow: '0 8px 18px rgba(36, 87, 214, 0.18)',
-          '&:hover': {
-            boxShadow: '0 10px 22px rgba(36, 87, 214, 0.24)',
+    shape: { borderRadius: 16 },
+    typography: {
+      fontFamily: 'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+      h2: { fontWeight: 850, letterSpacing: '-0.055em' },
+      h3: { fontWeight: 850, letterSpacing: '-0.045em' },
+      h4: { fontWeight: 820, letterSpacing: '-0.035em' },
+      h5: { fontWeight: 800, letterSpacing: '-0.025em' },
+      h6: { fontWeight: 780, letterSpacing: '-0.015em' },
+      button: { textTransform: 'none', fontWeight: 750 },
+      overline: { fontWeight: 800, letterSpacing: '0.12em' },
+    },
+    components: {
+      MuiCssBaseline: {
+        styleOverrides: {
+          body: {
+            backgroundColor: dark ? '#0e1420' : '#f4f7fb',
+            colorScheme: mode,
           },
         },
       },
-    },
-    MuiOutlinedInput: {
-      styleOverrides: {
-        root: { borderRadius: 12, backgroundColor: '#ffffff' },
+      MuiPaper: {
+        styleOverrides: {
+          root: { backgroundImage: 'none' },
+        },
+      },
+      MuiCard: {
+        styleOverrides: {
+          root: {
+            borderColor: dark ? '#2a3547' : '#e4e9f1',
+            boxShadow: '0 1px 2px rgba(16, 24, 40, 0.02)',
+          },
+        },
+      },
+      MuiButton: {
+        styleOverrides: {
+          root: {
+            minHeight: 42,
+            borderRadius: 12,
+            boxShadow: 'none',
+          },
+          contained: {
+            boxShadow: dark ? '0 8px 18px rgba(0,0,0,.28)' : '0 8px 18px rgba(36, 87, 214, 0.18)',
+            '&:hover': {
+              boxShadow: dark ? '0 10px 22px rgba(0,0,0,.36)' : '0 10px 22px rgba(36, 87, 214, 0.24)',
+            },
+          },
+        },
+      },
+      MuiOutlinedInput: {
+        styleOverrides: {
+          root: {
+            borderRadius: 12,
+            backgroundColor: dark ? '#111927' : '#ffffff',
+          },
+        },
+      },
+      MuiDialog: {
+        styleOverrides: {
+          paper: { borderRadius: 20 },
+        },
+      },
+      MuiChip: {
+        styleOverrides: {
+          root: { fontWeight: 700 },
+        },
+      },
+      MuiTableCell: {
+        styleOverrides: {
+          root: { borderColor: dark ? '#2a3547' : '#e8ecf3' },
+          head: {
+            fontWeight: 800,
+            color: dark ? '#dbe3f1' : '#344054',
+            backgroundColor: dark ? '#111927' : '#f8fafc',
+          },
+        },
+      },
+      MuiTooltip: {
+        defaultProps: { arrow: true },
       },
     },
-    MuiDialog: {
-      styleOverrides: {
-        paper: { borderRadius: 20 },
-      },
-    },
-    MuiChip: {
-      styleOverrides: {
-        root: { fontWeight: 700 },
-      },
-    },
-    MuiTableCell: {
-      styleOverrides: {
-        root: { borderColor: '#e8ecf3' },
-        head: { fontWeight: 800, color: '#344054', backgroundColor: '#f8fafc' },
-      },
-    },
-    MuiTooltip: {
-      defaultProps: { arrow: true },
-    },
-  },
-})
+  })
+}
+
 
 const navigation = [
   {
@@ -557,6 +572,75 @@ function DueStatus({ date }) {
   return <Chip size="small" color={color} icon={icon} label={label} variant={color === 'default' ? 'outlined' : 'filled'} />
 }
 
+function WorkAreas({ data, counts, openPage }) {
+  return (
+    <Box>
+      <Box sx={{ mb: 2 }}>
+        <Typography variant="h5">Arbeitsbereiche</Typography>
+        <Typography color="text.secondary" sx={{ mt: 0.6 }}>
+          Direkter Zugriff auf alle eingerichteten Geschäftsmodule.
+        </Typography>
+      </Box>
+
+      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))', xl: 'repeat(3, minmax(0, 1fr))' }, gap: 2.1 }}>
+        {moduleCards.map((item) => {
+          const Icon = item.icon
+          const sourceStatus = data[item.sourceKey].status
+          return (
+            <Paper
+              key={item.title}
+              component="button"
+              type="button"
+              onClick={() => openPage(item.title)}
+              elevation={0}
+              sx={{
+                p: 2.6,
+                minHeight: 205,
+                cursor: 'pointer',
+                border: '1px solid',
+                borderColor: 'divider',
+                bgcolor: 'background.paper',
+                color: 'text.primary',
+                display: 'flex',
+                flexDirection: 'column',
+                textAlign: 'left',
+                font: 'inherit',
+                transition: 'transform .18s ease, box-shadow .18s ease, border-color .18s ease',
+                '&:hover': {
+                  transform: 'translateY(-4px)',
+                  boxShadow: '0 18px 40px rgba(31,45,78,.11)',
+                  borderColor: item.accent,
+                },
+              }}
+            >
+              <Stack direction="row" alignItems="flex-start" justifyContent="space-between" spacing={2}>
+                <Box sx={{ width: 48, height: 48, borderRadius: 3, display: 'grid', placeItems: 'center', color: item.accent, bgcolor: item.soft }}>
+                  <Icon />
+                </Box>
+                <Stack direction="row" spacing={0.6} alignItems="baseline">
+                  {sourceStatus === 'loading' ? (
+                    <Skeleton width={34} />
+                  ) : (
+                    <Typography variant="h5" color="text.primary">{sourceStatus === 'error' ? '–' : counts[item.sourceKey]}</Typography>
+                  )}
+                  <Typography variant="caption" color="text.secondary">{item.countLabel}</Typography>
+                </Stack>
+              </Stack>
+              <Typography variant="overline" sx={{ mt: 2.2, color: item.accent }}>{item.eyebrow}</Typography>
+              <Typography variant="h6" sx={{ mt: -0.15 }}>{item.title}</Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 0.7, lineHeight: 1.6, flexGrow: 1 }}>{item.description}</Typography>
+              <Stack direction="row" spacing={0.7} alignItems="center" sx={{ mt: 2, color: item.accent }}>
+                <Typography variant="body2" fontWeight={800}>Öffnen</Typography>
+                <ArrowForwardRoundedIcon sx={{ fontSize: 18 }} />
+              </Stack>
+            </Paper>
+          )
+        })}
+      </Box>
+    </Box>
+  )
+}
+
 function Dashboard({ user, openPage }) {
   const data = useDashboardData(user)
   const today = todayIso()
@@ -661,15 +745,15 @@ function Dashboard({ user, openPage }) {
 
           <Paper elevation={0} sx={{ display: { xs: 'none', lg: 'block' }, p: 2.5, bgcolor: 'rgba(9, 31, 73, .34)', color: 'white', border: '1px solid rgba(255,255,255,.13)', backdropFilter: 'blur(10px)' }}>
             <Typography variant="overline" sx={{ opacity: 0.65 }}>HEUTE IM BLICK</Typography>
-            <Stack spacing={2.1} sx={{ mt: 1.5 }}>
+            <Stack spacing={1.25} sx={{ mt: 1.25 }}>
               <Stack direction="row" justifyContent="space-between" alignItems="center">
-                <Typography sx={{ opacity: 0.78 }}>Offene Aufgaben</Typography>
-                <Typography variant="h5">{data.tasks.status === 'ready' ? openTasks.length : '–'}</Typography>
+                <Typography sx={{ opacity: 0.78, lineHeight: 1.2 }}>Offene Aufgaben</Typography>
+                <Typography variant="h5" sx={{ minWidth: 42, textAlign: 'right', lineHeight: 1.15, m: 0 }}>{data.tasks.status === 'ready' ? openTasks.length : '–'}</Typography>
               </Stack>
               <Divider sx={{ borderColor: 'rgba(255,255,255,.12)' }} />
               <Stack direction="row" justifyContent="space-between" alignItems="center">
-                <Typography sx={{ opacity: 0.78 }}>Überfällig</Typography>
-                <Typography variant="h5" color={overdueTasks.length ? '#ffd0c8' : 'inherit'}>{data.tasks.status === 'ready' ? overdueTasks.length : '–'}</Typography>
+                <Typography sx={{ opacity: 0.78, lineHeight: 1.2 }}>Überfällig</Typography>
+                <Typography variant="h5" sx={{ minWidth: 42, textAlign: 'right', lineHeight: 1.15, m: 0 }} color={overdueTasks.length ? '#ffd0c8' : 'inherit'}>{data.tasks.status === 'ready' ? overdueTasks.length : '–'}</Typography>
               </Stack>
               <Divider sx={{ borderColor: 'rgba(255,255,255,.12)' }} />
               <Stack direction="row" spacing={1} alignItems="center">
@@ -683,6 +767,8 @@ function Dashboard({ user, openPage }) {
           </Paper>
         </Box>
       </Paper>
+
+      <WorkAreas data={data} counts={counts} openPage={openPage} />
 
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))', xl: 'repeat(4, minmax(0, 1fr))' }, gap: 2 }}>
         <MetricCard
@@ -799,52 +885,6 @@ function Dashboard({ user, openPage }) {
         </Paper>
       </Box>
 
-      <Box>
-        <Typography variant="h5">Arbeitsbereiche</Typography>
-        <Typography color="text.secondary" sx={{ mt: 0.6 }}>Direkter Zugriff auf alle eingerichteten Geschäftsmodule.</Typography>
-      </Box>
-
-      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))', xl: 'repeat(3, minmax(0, 1fr))' }, gap: 2.1 }}>
-        {moduleCards.map((item) => {
-          const Icon = item.icon
-          const sourceStatus = data[item.sourceKey].status
-          return (
-            <Paper
-              key={item.title}
-              component="button"
-              type="button"
-              onClick={() => openPage(item.title)}
-              elevation={0}
-              sx={{
-                appearance: 'none',
-                width: '100%',
-                p: 3,
-                minHeight: 220,
-                cursor: 'pointer',
-                border: '1px solid #e4e9f1',
-                color: 'text.primary',
-                textAlign: 'left',
-                display: 'flex',
-                flexDirection: 'column',
-                transition: 'transform .18s ease, box-shadow .18s ease, border-color .18s ease',
-                '&:hover': { transform: 'translateY(-3px)', boxShadow: '0 18px 38px rgba(31,45,78,.1)', borderColor: '#cdd8ee' },
-                '&:focus-visible': { outline: '3px solid rgba(36,87,214,.24)', outlineOffset: 2 },
-              }}
-            >
-              <Stack direction="row" alignItems="flex-start" justifyContent="space-between" width="100%">
-                <Box sx={{ width: 50, height: 50, borderRadius: 3.3, display: 'grid', placeItems: 'center', bgcolor: item.soft, color: item.accent }}><Icon /></Box>
-                <Stack direction="row" spacing={0.7} alignItems="center">
-                  {sourceStatus === 'loading' ? <Skeleton width={44} /> : <Typography variant="body2" color="text.secondary" fontWeight={750}>{sourceStatus === 'ready' ? counts[item.sourceKey] : '–'} {item.countLabel}</Typography>}
-                  <ArrowForwardRoundedIcon color="action" />
-                </Stack>
-              </Stack>
-              <Typography variant="overline" sx={{ mt: 2.3, color: item.accent }}>{item.eyebrow}</Typography>
-              <Typography variant="h6">{item.title}</Typography>
-              <Typography color="text.secondary" sx={{ mt: 0.8, lineHeight: 1.6 }}>{item.description}</Typography>
-            </Paper>
-          )
-        })}
-      </Box>
     </Stack>
   )
 }
@@ -866,7 +906,7 @@ function NavigationContent({ page, setPage, user, logout, closeMobile, mobile = 
   }
 
   return (
-    <Stack sx={{ height: '100%', bgcolor: '#ffffff' }}>
+    <Stack sx={{ height: '100%', bgcolor: 'background.paper' }}>
       <Box sx={{ px: 2.4, py: 2.25, minHeight: headerHeight, display: 'flex', alignItems: 'center' }}>
         <Stack direction="row" spacing={1.25} alignItems="center" sx={{ flexGrow: 1, minWidth: 0 }}>
           <Box sx={{ width: 43, height: 43, flexShrink: 0, borderRadius: 3, display: 'grid', placeItems: 'center', color: 'white', background: 'linear-gradient(145deg,#173c8d,#2d67e4)', boxShadow: '0 8px 18px rgba(36,87,214,.22)' }}>
@@ -906,7 +946,7 @@ function NavigationContent({ page, setPage, user, logout, closeMobile, mobile = 
                 '&::before': selected ? { content: '""', position: 'absolute', left: -1, top: 11, bottom: 11, width: 3, borderRadius: 4, bgcolor: 'primary.main' } : undefined,
                 '&.Mui-selected': { bgcolor: 'primary.light', color: 'primary.main' },
                 '&.Mui-selected:hover': { bgcolor: 'primary.light' },
-                '&:hover': { bgcolor: '#f5f7fb', color: 'text.primary' },
+                '&:hover': { bgcolor: 'action.hover', color: 'text.primary' },
               }}
             >
               <ListItemIcon sx={{ minWidth: 42, color: 'inherit' }}><Icon fontSize="small" /></ListItemIcon>
@@ -924,7 +964,7 @@ function NavigationContent({ page, setPage, user, logout, closeMobile, mobile = 
       <Box sx={{ flexGrow: 1 }} />
 
       <Box sx={{ px: 2, pb: 1.5 }}>
-        <Paper elevation={0} sx={{ p: 1.4, border: '1px solid #e5eaf2', bgcolor: '#f8fafc' }}>
+        <Paper elevation={0} sx={{ p: 1.4, border: '1px solid', borderColor: 'divider', bgcolor: 'background.default' }}>
           <Stack direction="row" spacing={1} alignItems="center">
             <Box sx={{ width: 34, height: 34, borderRadius: 2.3, display: 'grid', placeItems: 'center', bgcolor: '#e9f8f2', color: 'success.main' }}><CloudDoneRoundedIcon sx={{ fontSize: 19 }} /></Box>
             <Box>
@@ -952,7 +992,7 @@ function NavigationContent({ page, setPage, user, logout, closeMobile, mobile = 
   )
 }
 
-function FixedHeader({ page, user, openMobileNavigation, logout }) {
+function FixedHeader({ page, user, openMobileNavigation, logout, colorMode, toggleColorMode }) {
   const current = pageMeta[page] || pageMeta.Dashboard
 
   return (
@@ -963,8 +1003,9 @@ function FixedHeader({ page, user, openMobileNavigation, logout }) {
       sx={{
         width: { lg: `calc(100% - ${drawerWidth}px)` },
         ml: { lg: `${drawerWidth}px` },
-        bgcolor: 'rgba(255,255,255,.92)',
-        borderBottom: '1px solid #e5eaf2',
+        bgcolor: colorMode === 'dark' ? 'rgba(23,31,45,.94)' : 'rgba(255,255,255,.92)',
+        borderBottom: '1px solid',
+        borderColor: 'divider',
         backdropFilter: 'blur(16px)',
         zIndex: (muiTheme) => muiTheme.zIndex.drawer - 1,
       }}
@@ -997,6 +1038,11 @@ function FixedHeader({ page, user, openMobileNavigation, logout }) {
             {formatDate(todayIso(), { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric' })}
           </Typography>
           <Divider orientation="vertical" flexItem sx={{ mx: { xs: 0.3, sm: 0.8 } }} />
+          <Tooltip title={colorMode === 'dark' ? 'Normalmodus einschalten' : 'Darkmode einschalten'}>
+            <IconButton onClick={toggleColorMode} aria-label={colorMode === 'dark' ? 'Normalmodus einschalten' : 'Darkmode einschalten'}>
+              {colorMode === 'dark' ? <LightModeRoundedIcon /> : <DarkModeRoundedIcon />}
+            </IconButton>
+          </Tooltip>
           <Avatar sx={{ width: 38, height: 38, bgcolor: 'primary.light', color: 'primary.main', fontSize: '.82rem', fontWeight: 850 }}>{initialsFor(user)}</Avatar>
           <Tooltip title="Abmelden">
             <IconButton onClick={logout} aria-label="Abmelden" sx={{ display: { xs: 'none', sm: 'inline-flex' } }}><LogoutRoundedIcon fontSize="small" /></IconButton>
@@ -1049,7 +1095,7 @@ function MobileNavigation({ page, setPage, openMore }) {
   )
 }
 
-function AuthenticatedArea({ user }) {
+function AuthenticatedArea({ user, colorMode, toggleColorMode }) {
   const [page, setPage] = useState('Dashboard')
   const [mobileOpen, setMobileOpen] = useState(false)
 
@@ -1112,6 +1158,8 @@ function AuthenticatedArea({ user }) {
         user={user}
         openMobileNavigation={() => setMobileOpen(true)}
         logout={logout}
+        colorMode={colorMode}
+        toggleColorMode={toggleColorMode}
       />
 
       <Box
@@ -1142,7 +1190,7 @@ function AuthenticatedArea({ user }) {
 
 function LoadingScreen() {
   return (
-    <Box sx={{ minHeight: '100vh', display: 'grid', placeItems: 'center', bgcolor: '#f4f7fb' }}>
+    <Box sx={{ minHeight: '100vh', display: 'grid', placeItems: 'center', bgcolor: 'background.default' }}>
       <Stack spacing={2} alignItems="center">
         <Box sx={{ width: 56, height: 56, borderRadius: 4, display: 'grid', placeItems: 'center', color: 'white', bgcolor: 'primary.main', boxShadow: '0 14px 30px rgba(36,87,214,.25)' }}>
           <ShieldRoundedIcon />
@@ -1156,7 +1204,18 @@ function LoadingScreen() {
 
 function App() {
   const [user, setUser] = useState(null)
+  const [colorMode, setColorMode] = useState(() => localStorage.getItem('sven-suite-color-mode') === 'dark' ? 'dark' : 'light')
   const [checkingAuth, setCheckingAuth] = useState(true)
+
+  const theme = useMemo(() => createAppTheme(colorMode), [colorMode])
+
+  function toggleColorMode() {
+    setColorMode((current) => {
+      const next = current === 'dark' ? 'light' : 'dark'
+      localStorage.setItem('sven-suite-color-mode', next)
+      return next
+    })
+  }
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
@@ -1169,7 +1228,7 @@ function App() {
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
-      {checkingAuth ? <LoadingScreen /> : user ? <AuthenticatedArea user={user} /> : <Login />}
+      {checkingAuth ? <LoadingScreen /> : user ? <AuthenticatedArea user={user} colorMode={colorMode} toggleColorMode={toggleColorMode} /> : <Login />}
     </ThemeProvider>
   )
 }
