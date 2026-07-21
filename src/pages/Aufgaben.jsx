@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   Alert,
   Box,
@@ -41,7 +41,6 @@ import {
   collection,
   deleteDoc,
   doc,
-  getDocs,
   onSnapshot,
   query,
   serverTimestamp,
@@ -79,29 +78,16 @@ function datumFormatieren(value) {
   return Number.isNaN(datum.getTime()) ? value : datum.toLocaleDateString('de-DE')
 }
 
-function zeitstempelZuDatum(value) {
-  if (!value) return null
-  if (typeof value.toDate === 'function') return value.toDate()
-  if (typeof value.seconds === 'number') {
-    return new Date((value.seconds * 1000) + ((value.nanoseconds || 0) / 1000000))
-  }
-
-  const datum = value instanceof Date ? value : new Date(value)
-  return Number.isNaN(datum.getTime()) ? null : datum
-}
-
-function erledigtZeitFormatieren(value) {
-  const datum = zeitstempelZuDatum(value)
-  if (!datum) return 'Zeitpunkt nicht gespeichert'
-
-  return datum.toLocaleString('de-DE', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  })
-}
-
-function zeitstempelMillis(value) {
-  return zeitstempelZuDatum(value)?.getTime() || 0
+function zeitstempelFormatieren(value) {
+  if (!value) return 'Zeitpunkt nicht verfügbar'
+  const datum = typeof value?.toDate === 'function'
+    ? value.toDate()
+    : value?.seconds
+      ? new Date(value.seconds * 1000)
+      : new Date(value)
+  return Number.isNaN(datum.getTime())
+    ? 'Zeitpunkt nicht verfügbar'
+    : datum.toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' })
 }
 
 function prioritaetsFarbe(prioritaet) {
@@ -151,12 +137,6 @@ export default function Aufgaben() {
     const gespeichert = localStorage.getItem(`sven-suite-aufgaben-bereich-${aktuelleUserId}`)
     return gespeichert === 'privat' ? 'privat' : 'arbeit'
   })
-  const [zeigeLetzteErledigte, setZeigeLetzteErledigte] = useState(() => {
-    const aktuelleUserId = auth.currentUser?.uid
-    if (!aktuelleUserId) return false
-
-    return localStorage.getItem(`sven-suite-letzte-erledigte-offen-${aktuelleUserId}`) === 'true'
-  })
 
   const [aufgabeDialog, setAufgabeDialog] = useState(false)
   const [aufgabeId, setAufgabeId] = useState(null)
@@ -165,11 +145,13 @@ export default function Aufgaben() {
   const [kategorieDialog, setKategorieDialog] = useState(false)
   const [kategorieId, setKategorieId] = useState(null)
   const [kategorieName, setKategorieName] = useState('')
+  const [kategorieBereich, setKategorieBereich] = useState('arbeit')
 
   const [loeschKategorie, setLoeschKategorie] = useState(null)
   const [loeschBestaetigung, setLoeschBestaetigung] = useState('')
   const [verschiebeAufgaben, setVerschiebeAufgaben] = useState(true)
   const [speichert, setSpeichert] = useState(false)
+  const [erledigteOffen, setErledigteOffen] = useState(true)
   const [offeneKategorien, setOffeneKategorien] = useState(() => {
     const aktuelleUserId = auth.currentUser?.uid
     if (!aktuelleUserId) return {}
@@ -184,7 +166,6 @@ export default function Aufgaben() {
       return {}
     }
   })
-  const standardBereinigungLaeuft = useRef(false)
 
   useEffect(() => {
     if (!user) return undefined
@@ -207,94 +188,42 @@ export default function Aufgaben() {
   useEffect(() => {
     if (!user) return
 
-    const standardRef = doc(db, 'aufgabenKategorien', `allgemein-${user.uid}`)
-    setDoc(
-      standardRef,
+    const standardKategorien = [
+      { id: `allgemein-${user.uid}-arbeit`, bereich: 'arbeit' },
+      { id: `allgemein-${user.uid}-privat`, bereich: 'privat' },
+    ]
+
+    Promise.all(standardKategorien.map((eintrag) => setDoc(
+      doc(db, 'aufgabenKategorien', eintrag.id),
       {
         userId: user.uid,
         name: STANDARD_KATEGORIE,
+        bereich: eintrag.bereich,
         system: true,
         aktualisiertAm: serverTimestamp(),
       },
       { merge: true },
-    ).catch((error) => {
+    ))).catch((error) => {
       console.error(error)
-      setFehler('Die Standardkategorie konnte nicht angelegt werden.')
+      setFehler('Die Standardkategorien konnten nicht angelegt werden.')
     })
   }, [user])
 
-  useEffect(() => {
-    if (!user || standardBereinigungLaeuft.current) return
-
-    const standardId = `allgemein-${user.uid}`
-    const standardIstVorhanden = kategorien.some((item) => item.id === standardId)
-    if (!standardIstVorhanden) return
-
-    const doppelteKategorien = kategorien.filter((item) => (
-      item.id !== standardId
-      && String(item.name || '').trim().toLocaleLowerCase('de-DE') === STANDARD_KATEGORIE.toLocaleLowerCase('de-DE')
-    ))
-
-    if (!doppelteKategorien.length) return
-
-    standardBereinigungLaeuft.current = true
-
-    async function doppelteAllgemeinKategorienBereinigen() {
-      try {
-        const doppelteIds = new Set(doppelteKategorien.map((item) => item.id))
-        const aufgabenSnapshot = await getDocs(
-          query(collection(db, 'suiteAufgaben'), where('userId', '==', user.uid)),
-        )
-
-        const aktionen = []
-        aufgabenSnapshot.docs.forEach((aufgabeDokument) => {
-          if (doppelteIds.has(aufgabeDokument.data().kategorieId)) {
-            aktionen.push({ typ: 'update', ref: aufgabeDokument.ref })
-          }
-        })
-        doppelteKategorien.forEach((kategorie) => {
-          aktionen.push({ typ: 'delete', ref: doc(db, 'aufgabenKategorien', kategorie.id) })
-        })
-
-        for (let index = 0; index < aktionen.length; index += 450) {
-          const batch = writeBatch(db)
-          aktionen.slice(index, index + 450).forEach((aktion) => {
-            if (aktion.typ === 'update') {
-              batch.update(aktion.ref, {
-                kategorieId: standardId,
-                aktualisiertAm: serverTimestamp(),
-              })
-            } else {
-              batch.delete(aktion.ref)
-            }
-          })
-          await batch.commit()
-        }
-      } catch (error) {
-        console.error(error)
-        standardBereinigungLaeuft.current = false
-        setFehler('Doppelte Allgemein-Kategorien konnten nicht automatisch bereinigt werden.')
-      }
-    }
-
-    doppelteAllgemeinKategorienBereinigen()
-  }, [user, kategorien])
+  const bereichKategorien = useMemo(
+    () => kategorien.filter((item) => (item.bereich || 'arbeit') === bereich),
+    [kategorien, bereich],
+  )
 
   const sortierteKategorien = useMemo(
-    () => [...kategorien].sort((a, b) => String(a.name).localeCompare(String(b.name), 'de')),
-    [kategorien],
+    () => [...bereichKategorien].sort((a, b) => String(a.name).localeCompare(String(b.name), 'de')),
+    [bereichKategorien],
   )
-  const standardKategorie = kategorien.find((item) => item.id === `allgemein-${user?.uid}`)
-    || kategorien.find((item) => String(item.name || '').trim().toLocaleLowerCase('de-DE') === STANDARD_KATEGORIE.toLocaleLowerCase('de-DE'))
+  const standardKategorie = bereichKategorien.find((item) => item.id === `allgemein-${user?.uid}-${bereich}`)
+    || bereichKategorien.find((item) => String(item.name || '').trim().toLocaleLowerCase('de-DE') === STANDARD_KATEGORIE.toLocaleLowerCase('de-DE'))
   const heute = heuteIso()
   const offeneKategorienSchluessel = user ? `sven-suite-aufgaben-kategorien-${user.uid}` : ''
   const bereichSchluessel = user ? `sven-suite-aufgaben-bereich-${user.uid}` : ''
-  const letzteErledigteSchluessel = user ? `sven-suite-letzte-erledigte-offen-${user.uid}` : ''
   const bereichName = bereich === 'privat' ? 'Privat' : 'Arbeit'
-  const kategorienNameNachId = useMemo(
-    () => new Map(kategorien.map((kategorie) => [kategorie.id, kategorie.name])),
-    [kategorien],
-  )
 
   // Nur Aufgaben mit einer ausdrücklichen Bereichszuordnung werden angezeigt.
   // Bestehende Aufgaben ohne "bereich" bleiben unverändert und werden nicht automatisch migriert.
@@ -310,13 +239,15 @@ export default function Aufgaben() {
     erledigt: bereichAufgaben.filter((a) => a.erledigt).length,
   }), [bereichAufgaben, heute])
 
-  const letzteErledigteAufgaben = useMemo(
-    () => [...bereichAufgaben]
-      .filter((aufgabe) => aufgabe.erledigt)
-      .sort((a, b) => zeitstempelMillis(b.erledigtAm) - zeitstempelMillis(a.erledigtAm))
-      .slice(0, 10),
-    [bereichAufgaben],
-  )
+
+  const letzteErledigte = useMemo(() => [...bereichAufgaben]
+    .filter((aufgabe) => aufgabe.erledigt)
+    .sort((a, b) => {
+      const aZeit = a.erledigtAm?.seconds || a.aktualisiertAm?.seconds || 0
+      const bZeit = b.erledigtAm?.seconds || b.aktualisiertAm?.seconds || 0
+      return bZeit - aZeit
+    })
+    .slice(0, 10), [bereichAufgaben])
 
   const gefilterteAufgaben = useMemo(() => {
     const term = suche.trim().toLowerCase()
@@ -340,14 +271,14 @@ export default function Aufgaben() {
       }))
       .filter((gruppe) => gruppe.aufgaben.length > 0)
 
-    const bekannteIds = new Set(kategorien.map((item) => item.id))
+    const bekannteIds = new Set(bereichKategorien.map((item) => item.id))
     const ohneKategorie = gefilterteAufgaben.filter((aufgabe) => !bekannteIds.has(aufgabe.kategorieId))
     if (ohneKategorie.length > 0) {
       gruppen.push({ id: '__ohne_kategorie__', name: 'Ohne Kategorie', system: true, aufgaben: ohneKategorie })
     }
 
     return gruppen
-  }, [gefilterteAufgaben, kategorien, sortierteKategorien])
+  }, [gefilterteAufgaben, bereichKategorien, sortierteKategorien])
 
   function bereichWechseln(_event, neuerBereich) {
     if (!neuerBereich) return
@@ -355,16 +286,6 @@ export default function Aufgaben() {
     setBereich(neuerBereich)
     setFilterKategorie('Alle')
     if (bereichSchluessel) localStorage.setItem(bereichSchluessel, neuerBereich)
-  }
-
-  function letzteErledigteUmschalten() {
-    setZeigeLetzteErledigte((vorher) => {
-      const naechsterStand = !vorher
-      if (letzteErledigteSchluessel) {
-        localStorage.setItem(letzteErledigteSchluessel, String(naechsterStand))
-      }
-      return naechsterStand
-    })
   }
 
   function neueAufgabe(kategorieId = '') {
@@ -424,9 +345,6 @@ export default function Aufgaben() {
         notizen: aufgabeForm.notizen.trim(),
         verantwortlich: aufgabeForm.verantwortlich.trim(),
         erledigt,
-        erledigtAm: erledigt
-          ? (aufgabeForm.erledigt && aufgabeForm.erledigtAm ? aufgabeForm.erledigtAm : serverTimestamp())
-          : null,
         userId: user.uid,
         aktualisiertAm: serverTimestamp(),
       }
@@ -454,7 +372,6 @@ export default function Aufgaben() {
           id: undefined,
           erledigt: false,
           status: 'Offen',
-          erledigtAm: null,
           bereich: aufgabe.bereich || bereich,
           faelligAm: naechstesDatum(aufgabe.faelligAm, aufgabe.wiederholung),
           userId: user.uid,
@@ -474,19 +391,19 @@ export default function Aufgaben() {
     catch (error) { console.error(error); setFehler('Aufgabe konnte nicht gelöscht werden.') }
   }
 
-  function neueKategorie() { setKategorieId(null); setKategorieName(''); setKategorieDialog(true) }
-  function kategorieBearbeiten(kategorie) { setKategorieId(kategorie.id); setKategorieName(kategorie.name); setKategorieDialog(true) }
+  function neueKategorie() { setKategorieId(null); setKategorieName(''); setKategorieBereich(bereich); setKategorieDialog(true) }
+  function kategorieBearbeiten(kategorie) { setKategorieId(kategorie.id); setKategorieName(kategorie.name); setKategorieBereich(kategorie.bereich || 'arbeit'); setKategorieDialog(true) }
 
   async function kategorieSpeichern() {
     const name = kategorieName.trim()
     if (!user || !name) return
-    if (kategorien.some((item) => item.id !== kategorieId && item.name.toLowerCase() === name.toLowerCase())) {
+    if (kategorien.some((item) => item.id !== kategorieId && (item.bereich || 'arbeit') === kategorieBereich && item.name.toLowerCase() === name.toLowerCase())) {
       setFehler('Eine Kategorie mit diesem Namen existiert bereits.'); return
     }
     setSpeichert(true); setFehler('')
     try {
       if (kategorieId) await updateDoc(doc(db, 'aufgabenKategorien', kategorieId), { name, aktualisiertAm: serverTimestamp() })
-      else await addDoc(collection(db, 'aufgabenKategorien'), { userId: user.uid, name, system: false, erstelltAm: serverTimestamp(), aktualisiertAm: serverTimestamp() })
+      else await addDoc(collection(db, 'aufgabenKategorien'), { userId: user.uid, name, bereich: kategorieBereich, system: false, erstelltAm: serverTimestamp(), aktualisiertAm: serverTimestamp() })
       setKategorieDialog(false)
     } catch (error) { console.error(error); setFehler('Kategorie konnte nicht gespeichert werden.') }
     finally { setSpeichert(false) }
@@ -532,75 +449,31 @@ export default function Aufgaben() {
         </Stack>
       </Paper>
 
-      <Paper
-        variant="outlined"
-        sx={{
-          width: '100%',
-          maxWidth: 680,
-          mx: 'auto',
-          p: 0.75,
-          borderRadius: 4,
-          bgcolor: 'action.hover',
-          boxShadow: '0 10px 30px rgba(15, 23, 42, 0.08)',
-        }}
-      >
+      <Paper sx={{ p: 1.25 }}>
         <ToggleButtonGroup
           value={bereich}
           exclusive
           onChange={bereichWechseln}
+          fullWidth
+          color="primary"
           aria-label="Aufgabenbereich auswählen"
           sx={{
-            width: '100%',
-            display: 'grid',
-            gridTemplateColumns: '1fr 1fr',
-            gap: 0.75,
-            '& .MuiToggleButtonGroup-grouped': {
-              m: 0,
-              border: 0,
-              borderRadius: '14px !important',
-            },
             '& .MuiToggleButton-root': {
-              minHeight: 62,
-              px: { xs: 1.25, sm: 2 },
-              py: 1.1,
-              color: 'text.secondary',
+              py: 1.25,
+              gap: 1,
+              fontWeight: 850,
               textTransform: 'none',
-              transition: 'transform 160ms ease, box-shadow 160ms ease, background-color 160ms ease',
-              '&:hover': {
-                bgcolor: 'background.paper',
-                color: 'primary.main',
-              },
-              '&.Mui-selected': {
-                bgcolor: 'primary.main',
-                color: 'primary.contrastText',
-                boxShadow: 3,
-                transform: 'translateY(-1px)',
-                '&:hover': { bgcolor: 'primary.dark' },
-              },
+              fontSize: { xs: '0.95rem', sm: '1rem' },
             },
           }}
         >
           <ToggleButton value="arbeit" aria-label="Arbeitsaufgaben anzeigen">
-            <Stack direction="row" alignItems="center" justifyContent="center" spacing={1.25}>
-              <WorkIcon />
-              <Box sx={{ textAlign: 'left' }}>
-                <Typography fontWeight={900} lineHeight={1.15}>Arbeit</Typography>
-                <Typography variant="caption" sx={{ opacity: 0.8, display: { xs: 'none', sm: 'block' } }}>
-                  Berufliche Aufgaben
-                </Typography>
-              </Box>
-            </Stack>
+            <WorkIcon />
+            Arbeit
           </ToggleButton>
           <ToggleButton value="privat" aria-label="Private Aufgaben anzeigen">
-            <Stack direction="row" alignItems="center" justifyContent="center" spacing={1.25}>
-              <HomeOutlinedIcon />
-              <Box sx={{ textAlign: 'left' }}>
-                <Typography fontWeight={900} lineHeight={1.15}>Privat</Typography>
-                <Typography variant="caption" sx={{ opacity: 0.8, display: { xs: 'none', sm: 'block' } }}>
-                  Persönliche Aufgaben
-                </Typography>
-              </Box>
-            </Stack>
+            <HomeOutlinedIcon />
+            Privat
           </ToggleButton>
         </ToggleButtonGroup>
       </Paper>
@@ -614,103 +487,12 @@ export default function Aufgaben() {
         <Kennzahl icon={<TaskAltIcon color="success" />} label="Erledigt" wert={kennzahlen.erledigt} />
       </Box>
 
-      <Paper variant="outlined" sx={{ overflow: 'hidden' }}>
-        <Stack
-          direction="row"
-          alignItems="center"
-          gap={1.25}
-          role="button"
-          tabIndex={0}
-          aria-expanded={zeigeLetzteErledigte}
-          onClick={letzteErledigteUmschalten}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter' || event.key === ' ') {
-              event.preventDefault()
-              letzteErledigteUmschalten()
-            }
-          }}
-          sx={{
-            p: { xs: 1.5, sm: 2 },
-            cursor: 'pointer',
-            bgcolor: zeigeLetzteErledigte ? 'action.selected' : 'background.paper',
-            '&:hover': { bgcolor: 'action.hover' },
-          }}
-        >
-          <IconButton
-            size="small"
-            tabIndex={-1}
-            aria-label={zeigeLetzteErledigte ? 'Zuletzt erledigte Aufgaben schließen' : 'Zuletzt erledigte Aufgaben öffnen'}
-          >
-            {zeigeLetzteErledigte ? <ExpandLessIcon /> : <ExpandMoreIcon />}
-          </IconButton>
-          <TaskAltIcon color="success" />
-          <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-            <Typography fontWeight={900}>Zuletzt erledigt</Typography>
-            <Typography variant="body2" color="text.secondary">
-              Die letzten {letzteErledigteAufgaben.length} von maximal 10 erledigten Aufgaben in {bereichName}
-            </Typography>
-          </Box>
-          <Chip
-            size="small"
-            color={zeigeLetzteErledigte ? 'success' : 'default'}
-            label={letzteErledigteAufgaben.length}
-          />
-        </Stack>
-
-        <Collapse in={zeigeLetzteErledigte} timeout="auto" unmountOnExit>
-          <Divider />
-          <Stack spacing={1} sx={{ p: { xs: 1.25, sm: 1.75 } }}>
-            {letzteErledigteAufgaben.length === 0 ? (
-              <Typography color="text.secondary" sx={{ py: 1, textAlign: 'center' }}>
-                Noch keine erledigten Aufgaben in {bereichName} vorhanden.
-              </Typography>
-            ) : letzteErledigteAufgaben.map((aufgabe) => (
-              <Paper key={aufgabe.id} variant="outlined" sx={{ p: 1.25 }}>
-                <Stack direction="row" gap={1} alignItems="flex-start">
-                  <Checkbox
-                    checked
-                    size="small"
-                    onChange={() => aufgabeStatusAendern(aufgabe)}
-                    inputProps={{ 'aria-label': `Aufgabe ${aufgabe.titel} wieder öffnen` }}
-                  />
-                  <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-                    <Typography fontWeight={800} sx={{ textDecoration: 'line-through' }}>
-                      {aufgabe.titel}
-                    </Typography>
-                    <Stack direction="row" gap={1} alignItems="center" flexWrap="wrap" mt={0.75}>
-                      <Chip
-                        size="small"
-                        variant="outlined"
-                        label={kategorienNameNachId.get(aufgabe.kategorieId) || 'Ohne Kategorie'}
-                      />
-                      <Typography variant="body2" color="text.secondary">
-                        Erledigt am {erledigtZeitFormatieren(aufgabe.erledigtAm)}
-                      </Typography>
-                    </Stack>
-                  </Box>
-                  <Tooltip title="Bearbeiten">
-                    <IconButton size="small" onClick={() => aufgabeBearbeiten(aufgabe)}>
-                      <EditIcon fontSize="small" />
-                    </IconButton>
-                  </Tooltip>
-                  <Tooltip title="Löschen">
-                    <IconButton size="small" color="error" onClick={() => aufgabeLoeschen(aufgabe)}>
-                      <DeleteIcon fontSize="small" />
-                    </IconButton>
-                  </Tooltip>
-                </Stack>
-              </Paper>
-            ))}
-          </Stack>
-        </Collapse>
-      </Paper>
-
       <Paper sx={{ p: 2 }}>
         <Stack direction={{ xs: 'column', lg: 'row' }} spacing={2} alignItems={{ lg: 'center' }}>
           <TextField label="Suche" value={suche} onChange={(e) => setSuche(e.target.value)} fullWidth />
           <TextField select label="Kategorie" value={filterKategorie} onChange={(e) => setFilterKategorie(e.target.value)} sx={{ minWidth: 210 }}>
             <MenuItem value="Alle">Alle Kategorien</MenuItem>
-            {sortierteKategorien.map((item) => <MenuItem key={item.id} value={item.id}>{item.name}</MenuItem>)}
+            {kategorien.filter((item) => (item.bereich || 'arbeit') === (aufgabeForm.bereich || bereich)).sort((a, b) => String(a.name).localeCompare(String(b.name), 'de')).map((item) => <MenuItem key={item.id} value={item.id}>{item.name}</MenuItem>)}
           </TextField>
           <TextField select label="Status" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} sx={{ minWidth: 150 }}>
             {['Offen', 'Erledigt', 'Alle'].map((wert) => <MenuItem key={wert} value={wert}>{wert}</MenuItem>)}
@@ -833,6 +615,44 @@ export default function Aufgaben() {
         </Paper>
       </Box>
 
+      <Paper variant="outlined" sx={{ overflow: 'hidden' }}>
+        <Stack
+          direction="row"
+          justifyContent="space-between"
+          alignItems="center"
+          onClick={() => setErledigteOffen((vorher) => !vorher)}
+          sx={{ p: 2, cursor: 'pointer', bgcolor: 'action.hover' }}
+        >
+          <Box>
+            <Typography variant="h6" fontWeight={800}>Letzte 10 erledigte Aufgaben – {bereichName}</Typography>
+            <Typography variant="body2" color="text.secondary">Mit Abschlussdatum und Uhrzeit · jederzeit wiederherstellbar</Typography>
+          </Box>
+          <IconButton aria-label={erledigteOffen ? 'Erledigte Aufgaben einklappen' : 'Erledigte Aufgaben ausklappen'}>
+            {erledigteOffen ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+          </IconButton>
+        </Stack>
+        <Collapse in={erledigteOffen} timeout="auto">
+          <Stack spacing={1} sx={{ p: 2, pt: 1.5 }}>
+            {!letzteErledigte.length && <Typography color="text.secondary">In diesem Bereich wurden noch keine Aufgaben erledigt.</Typography>}
+            {letzteErledigte.map((aufgabe) => (
+              <Paper key={aufgabe.id} variant="outlined" sx={{ p: 1.5 }}>
+                <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'stretch', sm: 'center' }} gap={1.5}>
+                  <Box sx={{ minWidth: 0 }}>
+                    <Typography fontWeight={800}>{aufgabe.titel}</Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Erledigt am {zeitstempelFormatieren(aufgabe.erledigtAm || aufgabe.aktualisiertAm)}
+                    </Typography>
+                  </Box>
+                  <Button variant="outlined" size="small" onClick={() => aufgabeStatusAendern(aufgabe)}>
+                    Wiederherstellen
+                  </Button>
+                </Stack>
+              </Paper>
+            ))}
+          </Stack>
+        </Collapse>
+      </Paper>
+
       <Dialog open={aufgabeDialog} onClose={() => setAufgabeDialog(false)} fullWidth maxWidth="sm">
         <DialogTitle>{aufgabeId ? 'Aufgabe bearbeiten' : 'Aufgabe anlegen'}</DialogTitle>
         <DialogContent><Stack spacing={2} mt={1}>
@@ -862,7 +682,15 @@ export default function Aufgaben() {
 
       <Dialog open={kategorieDialog} onClose={() => setKategorieDialog(false)} fullWidth maxWidth="xs">
         <DialogTitle>{kategorieId ? 'Kategorie bearbeiten' : 'Kategorie anlegen'}</DialogTitle>
-        <DialogContent><TextField label="Kategoriename" value={kategorieName} onChange={(e) => setKategorieName(e.target.value)} fullWidth autoFocus sx={{ mt: 1 }} /></DialogContent>
+        <DialogContent><Stack spacing={2} mt={1}>
+          {!kategorieId && <TextField select label="Bereich" value={kategorieBereich} onChange={(e) => setKategorieBereich(e.target.value)} fullWidth>
+            <MenuItem value="arbeit">Arbeit</MenuItem>
+            <MenuItem value="privat">Privat</MenuItem>
+          </TextField>}
+          {kategorieId && <Chip icon={kategorieBereich === 'privat' ? <HomeOutlinedIcon /> : <WorkIcon />} label={`Fest zugeordnet: ${kategorieBereich === 'privat' ? 'Privat' : 'Arbeit'}`} color="primary" variant="outlined" sx={{ alignSelf: 'flex-start' }} />}
+          <TextField label="Kategoriename" value={kategorieName} onChange={(e) => setKategorieName(e.target.value)} fullWidth autoFocus />
+          <Alert severity="info">Die Kategorie wird ausschließlich im gewählten Bereich angezeigt und kann später nicht in den anderen Bereich verschoben werden.</Alert>
+        </Stack></DialogContent>
         <DialogActions><Button onClick={() => setKategorieDialog(false)}>Abbrechen</Button><Button variant="contained" onClick={kategorieSpeichern} disabled={speichert || !kategorieName.trim()}>Speichern</Button></DialogActions>
       </Dialog>
 

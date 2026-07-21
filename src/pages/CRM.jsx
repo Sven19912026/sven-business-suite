@@ -46,6 +46,7 @@ import HistoryIcon from "@mui/icons-material/History";
 import ImageSearchIcon from "@mui/icons-material/ImageSearch";
 import PersonIcon from "@mui/icons-material/Person";
 import PictureAsPdfIcon from "@mui/icons-material/PictureAsPdf";
+import DescriptionIcon from "@mui/icons-material/Description";
 import SearchIcon from "@mui/icons-material/Search";
 import TaskAltIcon from "@mui/icons-material/TaskAlt";
 import {
@@ -99,6 +100,21 @@ const leerAufgabe = {
   faelligAm: "",
   prioritaet: "Mittel",
   status: "Offen",
+  notizen: "",
+};
+
+const leerVertrag = {
+  name: "",
+  vertragsnummer: "",
+  kategorie: "Dienstleistung",
+  status: "Aktiv",
+  startdatum: "",
+  enddatum: "",
+  kuendigungsfrist: "",
+  automatischeVerlaengerung: true,
+  kosten: "",
+  kostenIntervall: "Monatlich",
+  ansprechpartner: "",
   notizen: "",
 };
 
@@ -448,6 +464,7 @@ export default function CRM() {
   const [aufgaben, setAufgaben] = useState([]);
   const [verhandlungen, setVerhandlungen] = useState([]);
   const [historie, setHistorie] = useState([]);
+  const [vertraege, setVertraege] = useState([]);
   const [auswahl, setAuswahl] = useState(null);
   const [detailTab, setDetailTab] = useState(0);
   const [suche, setSuche] = useState("");
@@ -467,6 +484,13 @@ export default function CRM() {
   const [aufgabeForm, setAufgabeForm] = useState(leerAufgabe);
   const [aufgabeId, setAufgabeId] = useState(null);
 
+  const [vertragDialog, setVertragDialog] = useState(false);
+  const [vertragForm, setVertragForm] = useState(leerVertrag);
+  const [vertragId, setVertragId] = useState(null);
+  const [offeneVertraege, setOffeneVertraege] = useState({});
+
+  const [pdfDialog, setPdfDialog] = useState(false);
+  const [pdfAuswahl, setPdfAuswahl] = useState([]);
 
   const [meldung, setMeldung] = useState("");
   const [importDialog, setImportDialog] = useState(false);
@@ -505,6 +529,7 @@ export default function CRM() {
     listen("aufgaben", setAufgaben);
     listen("verhandlungen", setVerhandlungen);
     listen("historie", setHistorie);
+    listen("vertraege", setVertraege);
 
     return () => unsub.forEach((fn) => fn());
   }, [user]);
@@ -536,6 +561,9 @@ export default function CRM() {
     .filter((x) => x.lieferantId === auswahl?.id)
     .sort((a, b) => String(a.faelligAm || "9999").localeCompare(String(b.faelligAm || "9999")));
   const lieferantenVerhandlungen = verhandlungen.filter((x) => x.lieferantId === auswahl?.id);
+  const lieferantenVertraege = vertraege
+    .filter((x) => x.lieferantId === auswahl?.id)
+    .sort((a, b) => String(a.enddatum || "9999-12-31").localeCompare(String(b.enddatum || "9999-12-31")));
   const lieferantenHistorie = historie
     .filter((x) => x.lieferantId === auswahl?.id)
     .sort((a, b) => (b.erstelltAm?.seconds || 0) - (a.erstelltAm?.seconds || 0));
@@ -694,6 +722,127 @@ export default function CRM() {
     await historieSchreiben(auswahl, `Aufgabe gelöscht: ${aufgabe.titel}`);
   }
 
+
+  function vertragNeu() {
+    if (!auswahl) return;
+    setVertragId(null);
+    setVertragForm(leerVertrag);
+    setVertragDialog(true);
+  }
+
+  function vertragBearbeiten(vertrag) {
+    setVertragId(vertrag.id);
+    setVertragForm({ ...leerVertrag, ...vertrag });
+    setVertragDialog(true);
+  }
+
+  async function vertragSpeichern() {
+    if (!user || !auswahl || !vertragForm.name.trim()) return;
+    setSpeichert(true);
+    try {
+      const daten = {
+        ...vertragForm,
+        kosten: String(vertragForm.kosten || ""),
+        userId: user.uid,
+        lieferantId: auswahl.id,
+        anbieter: auswahl.firma,
+        aktualisiertAm: serverTimestamp(),
+      };
+      if (vertragId) {
+        await updateDoc(doc(db, "vertraege", vertragId), daten);
+      } else {
+        await addDoc(collection(db, "vertraege"), { ...daten, erstelltAm: serverTimestamp() });
+      }
+      await historieSchreiben(auswahl, vertragId ? `Vertrag bearbeitet: ${vertragForm.name}` : `Vertrag angelegt: ${vertragForm.name}`);
+      setVertragDialog(false);
+    } catch (error) {
+      console.error(error);
+      setFehler("Vertrag konnte nicht gespeichert werden.");
+    } finally {
+      setSpeichert(false);
+    }
+  }
+
+  async function vertragLoeschen(vertrag) {
+    if (!window.confirm(`Vertrag „${vertrag.name}“ wirklich löschen?`)) return;
+    try {
+      await deleteDoc(doc(db, "vertraege", vertrag.id));
+      await historieSchreiben(auswahl, `Vertrag gelöscht: ${vertrag.name}`);
+    } catch (error) {
+      console.error(error);
+      setFehler("Vertrag konnte nicht gelöscht werden.");
+    }
+  }
+
+  function vertragAufklappen(id) {
+    setOffeneVertraege((vorher) => ({ ...vorher, [id]: !vorher[id] }));
+  }
+
+  function htmlSicher(value) {
+    return String(value ?? "").replace(/[&<>"']/g, (zeichen) => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;",
+    }[zeichen]));
+  }
+
+  function lieferantenPdfOeffnen() {
+    setPdfAuswahl(gefiltert.map((lieferant) => lieferant.id));
+    setPdfDialog(true);
+  }
+
+  function pdfAuswahlUmschalten(id) {
+    setPdfAuswahl((vorher) => vorher.includes(id) ? vorher.filter((wert) => wert !== id) : [...vorher, id]);
+  }
+
+  function lieferantenAlsPdfDrucken() {
+    const ausgewaehlt = lieferanten.filter((lieferant) => pdfAuswahl.includes(lieferant.id)).sort(sortByName);
+    if (!ausgewaehlt.length) return;
+    const bloecke = ausgewaehlt.map((lieferant) => {
+      const lieferantKontakte = kontakte.filter((kontakt) => kontakt.lieferantId === lieferant.id);
+      const lieferantVertraege = vertraege.filter((vertrag) => vertrag.lieferantId === lieferant.id);
+      const kontakteHtml = lieferantKontakte.length ? lieferantKontakte.map((kontakt) => `<li>${htmlSicher(kontakt.name)}${kontakt.position ? ` – ${htmlSicher(kontakt.position)}` : ""}${kontakt.telefon ? ` · ${htmlSicher(kontakt.telefon)}` : ""}${kontakt.email ? ` · ${htmlSicher(kontakt.email)}` : ""}</li>`).join("") : "<li>Keine Ansprechpartner hinterlegt</li>";
+      const vertraegeHtml = lieferantVertraege.length ? lieferantVertraege.map((vertrag) => `<li><strong>${htmlSicher(vertrag.name)}</strong> · ${htmlSicher(vertrag.status || "Aktiv")} · Ende: ${htmlSicher(vertrag.enddatum ? formatDatum(vertrag.enddatum) : "unbefristet")} · ${htmlSicher(vertrag.kosten || "—")} ${htmlSicher(vertrag.kostenIntervall || "")}</li>`).join("") : "<li>Keine Verträge hinterlegt</li>";
+      return `<section><h2>${htmlSicher(lieferant.firma)}</h2><div class="grid"><div><b>Kategorie:</b> ${htmlSicher(lieferant.kategorie || "—")}</div><div><b>Status:</b> ${htmlSicher(lieferant.status || "—")}</div><div><b>Kundennummer:</b> ${htmlSicher(lieferant.kundennummer || "—")}</div><div><b>Adresse:</b> ${htmlSicher([lieferant.strasse, [lieferant.plz, lieferant.ort].filter(Boolean).join(" ")].filter(Boolean).join(", ") || "—")}</div><div><b>Telefon:</b> ${htmlSicher(lieferant.telefon || "—")}</div><div><b>E-Mail:</b> ${htmlSicher(lieferant.email || "—")}</div><div><b>Zahlungsziel:</b> ${htmlSicher(lieferant.zahlungsziel || "—")}</div><div><b>Skonto:</b> ${htmlSicher(lieferant.skonto || "—")}</div></div><h3>Ansprechpartner</h3><ul>${kontakteHtml}</ul><h3>Verträge</h3><ul>${vertraegeHtml}</ul>${lieferant.notizen ? `<p><b>Notizen:</b> ${htmlSicher(lieferant.notizen)}</p>` : ""}</section>`;
+    }).join("");
+    const druckHtml = `<!doctype html><html><head><meta charset="utf-8"><title>Lieferantenübersicht</title><style>body{font-family:Arial,sans-serif;color:#172033;margin:28px}h1{margin-bottom:4px}.meta{color:#667085;margin-bottom:20px}section{border:1px solid #d0d5dd;border-radius:8px;padding:16px;margin-bottom:16px;page-break-inside:avoid}h2{margin:0 0 12px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:7px 18px;font-size:12px}h3{font-size:13px;margin:14px 0 5px}ul{margin:0;padding-left:18px;font-size:12px}p{font-size:12px}@page{margin:10mm}@media print{body{margin:0}}</style></head><body><h1>Lieferantenübersicht</h1><div class="meta">Erstellt am ${new Date().toLocaleString("de-DE")} · ${ausgewaehlt.length} Lieferant(en)</div>${bloecke}</body></html>`;
+
+    const vorhandenesIframe = document.getElementById("crm-druck-iframe");
+    if (vorhandenesIframe) vorhandenesIframe.remove();
+
+    const iframe = document.createElement("iframe");
+    iframe.id = "crm-druck-iframe";
+    iframe.setAttribute("title", "Druckansicht Lieferantenübersicht");
+    iframe.style.position = "fixed";
+    iframe.style.right = "0";
+    iframe.style.bottom = "0";
+    iframe.style.width = "0";
+    iframe.style.height = "0";
+    iframe.style.border = "0";
+    iframe.style.visibility = "hidden";
+    document.body.appendChild(iframe);
+
+    const druckDokument = iframe.contentDocument || iframe.contentWindow?.document;
+    if (!druckDokument || !iframe.contentWindow) {
+      iframe.remove();
+      setFehler("Die Druckansicht konnte nicht erstellt werden.");
+      return;
+    }
+
+    druckDokument.open();
+    druckDokument.write(druckHtml);
+    druckDokument.close();
+    setPdfDialog(false);
+    setFehler("");
+
+    window.setTimeout(() => {
+      try {
+        iframe.contentWindow.focus();
+        iframe.contentWindow.print();
+      } catch {
+        setFehler("Der Druckdialog konnte nicht geöffnet werden.");
+      }
+    }, 250);
+    window.setTimeout(() => iframe.remove(), 60000);
+  }
 
   function importZuruecksetzen() {
     setImportLaedt(false);
@@ -854,6 +1003,7 @@ export default function CRM() {
             <Tab label={`Ansprechpartner (${lieferantenKontakte.length})`} />
             <Tab label={`Aufgaben (${lieferantenAufgaben.filter((x) => x.status !== "Erledigt").length})`} />
             <Tab label={`Verhandlungen (${lieferantenVerhandlungen.length})`} />
+            <Tab label={`Verträge (${lieferantenVertraege.length})`} />
             <Tab label="Konditionen" />
             <Tab label="Historie" />
           </Tabs>
@@ -882,6 +1032,7 @@ export default function CRM() {
                 <InfoCard label="Ansprechpartner" value={lieferantenKontakte.length} icon={<PersonIcon color="primary" fontSize="large" />} />
                 <InfoCard label="Offene Aufgaben" value={lieferantenAufgaben.filter((x) => x.status !== "Erledigt").length} icon={<TaskAltIcon color="warning" fontSize="large" />} />
                 <InfoCard label="Verhandlungen" value={lieferantenVerhandlungen.length} icon={<BusinessIcon color="success" fontSize="large" />} />
+                <InfoCard label="Verträge" value={lieferantenVertraege.length} icon={<DescriptionIcon color="info" fontSize="large" />} />
               </Stack>
             </Grid>
           </Grid>
@@ -961,10 +1112,45 @@ export default function CRM() {
         )}
 
         {detailTab === 4 && (
-          <Card><CardContent><Typography variant="h6" fontWeight={800} mb={2}>Konditionen</Typography><Grid container spacing={2}><Grid size={{ xs: 12, sm: 6 }}><Typography color="text.secondary">Zahlungsziel</Typography><Typography>{auswahl.zahlungsziel || "—"}</Typography></Grid><Grid size={{ xs: 12, sm: 6 }}><Typography color="text.secondary">Skonto</Typography><Typography>{auswahl.skonto || "—"}</Typography></Grid><Grid size={{ xs: 12, sm: 6 }}><Typography color="text.secondary">Standardrabatt</Typography><Typography>{auswahl.standardrabatt || "—"}</Typography></Grid><Grid size={{ xs: 12, sm: 6 }}><Typography color="text.secondary">Bonusvereinbarung</Typography><Typography>{auswahl.bonusvereinbarung || "—"}</Typography></Grid><Grid size={{ xs: 12 }}><Typography color="text.secondary">Lieferbedingungen</Typography><Typography>{auswahl.lieferbedingungen || "—"}</Typography></Grid></Grid></CardContent></Card>
+          <Box>
+            <Stack direction="row" justifyContent="space-between" alignItems="center" mb={2}>
+              <Box><Typography variant="h6" fontWeight={800}>Verträge</Typography><Typography variant="body2" color="text.secondary">Mehrere Verträge je Dienstleister oder Lieferant verwalten.</Typography></Box>
+              <Button variant="contained" startIcon={<AddIcon />} onClick={vertragNeu}>Vertrag</Button>
+            </Stack>
+            <Stack spacing={1.5}>
+              {lieferantenVertraege.map((vertrag) => {
+                const istOffen = Boolean(offeneVertraege[vertrag.id]);
+                return <Paper key={vertrag.id} variant="outlined">
+                  <Stack direction="row" alignItems="center" spacing={1} sx={{ p: 1.5, cursor: "pointer" }} onClick={() => vertragAufklappen(vertrag.id)}>
+                    <IconButton size="small">{istOffen ? <ExpandLessIcon /> : <ExpandMoreIcon />}</IconButton>
+                    <Box sx={{ flexGrow: 1, minWidth: 0 }}><Typography fontWeight={800}>{vertrag.name}</Typography><Typography variant="body2" color="text.secondary">{vertrag.vertragsnummer ? `Nr. ${vertrag.vertragsnummer} · ` : ""}{vertrag.enddatum ? `Ende ${formatDatum(vertrag.enddatum)}` : "Unbefristet"}</Typography></Box>
+                    <Chip size="small" label={vertrag.status || "Aktiv"} color={vertrag.status === "Aktiv" ? "success" : "default"} />
+                    <Box onClick={(event) => event.stopPropagation()}><IconButton onClick={() => vertragBearbeiten(vertrag)}><EditIcon /></IconButton><IconButton color="error" onClick={() => vertragLoeschen(vertrag)}><DeleteIcon /></IconButton></Box>
+                  </Stack>
+                  <Collapse in={istOffen}>
+                    <Divider />
+                    <Grid container spacing={2} sx={{ p: 2 }}>
+                      <Grid size={{ xs: 12, sm: 6 }}><Typography color="text.secondary">Kategorie</Typography><Typography>{vertrag.kategorie || "—"}</Typography></Grid>
+                      <Grid size={{ xs: 12, sm: 6 }}><Typography color="text.secondary">Laufzeit</Typography><Typography>{formatDatum(vertrag.startdatum)} bis {vertrag.enddatum ? formatDatum(vertrag.enddatum) : "unbefristet"}</Typography></Grid>
+                      <Grid size={{ xs: 12, sm: 6 }}><Typography color="text.secondary">Kündigungsfrist</Typography><Typography>{vertrag.kuendigungsfrist || "—"}</Typography></Grid>
+                      <Grid size={{ xs: 12, sm: 6 }}><Typography color="text.secondary">Kosten</Typography><Typography>{vertrag.kosten || "—"} {vertrag.kostenIntervall || ""}</Typography></Grid>
+                      <Grid size={{ xs: 12, sm: 6 }}><Typography color="text.secondary">Automatische Verlängerung</Typography><Typography>{vertrag.automatischeVerlaengerung ? "Ja" : "Nein"}</Typography></Grid>
+                      <Grid size={{ xs: 12, sm: 6 }}><Typography color="text.secondary">Ansprechpartner</Typography><Typography>{vertrag.ansprechpartner || "—"}</Typography></Grid>
+                      {vertrag.notizen && <Grid size={{ xs: 12 }}><Typography color="text.secondary">Notizen</Typography><Typography sx={{ whiteSpace: "pre-wrap" }}>{vertrag.notizen}</Typography></Grid>}
+                    </Grid>
+                  </Collapse>
+                </Paper>;
+              })}
+              {!lieferantenVertraege.length && <Alert severity="info">Noch keine Verträge hinterlegt.</Alert>}
+            </Stack>
+          </Box>
         )}
 
         {detailTab === 5 && (
+          <Card><CardContent><Typography variant="h6" fontWeight={800} mb={2}>Konditionen</Typography><Grid container spacing={2}><Grid size={{ xs: 12, sm: 6 }}><Typography color="text.secondary">Zahlungsziel</Typography><Typography>{auswahl.zahlungsziel || "—"}</Typography></Grid><Grid size={{ xs: 12, sm: 6 }}><Typography color="text.secondary">Skonto</Typography><Typography>{auswahl.skonto || "—"}</Typography></Grid><Grid size={{ xs: 12, sm: 6 }}><Typography color="text.secondary">Standardrabatt</Typography><Typography>{auswahl.standardrabatt || "—"}</Typography></Grid><Grid size={{ xs: 12, sm: 6 }}><Typography color="text.secondary">Bonusvereinbarung</Typography><Typography>{auswahl.bonusvereinbarung || "—"}</Typography></Grid><Grid size={{ xs: 12 }}><Typography color="text.secondary">Lieferbedingungen</Typography><Typography>{auswahl.lieferbedingungen || "—"}</Typography></Grid></Grid></CardContent></Card>
+        )}
+
+        {detailTab === 6 && (
           <Stack spacing={1.5}>
             {lieferantenHistorie.map((h) => <Card key={h.id} variant="outlined"><CardContent><Stack direction="row" spacing={2} alignItems="center"><HistoryIcon color="action" /><Box><Typography fontWeight={700}>{h.text}</Typography><Typography color="text.secondary" variant="body2">{h.erstelltAm?.toDate ? h.erstelltAm.toDate().toLocaleString("de-DE") : "Gerade eben"}</Typography></Box></Stack></CardContent></Card>)}
             {lieferantenHistorie.length === 0 && <Alert severity="info">Noch keine Historieneinträge vorhanden.</Alert>}
@@ -974,6 +1160,7 @@ export default function CRM() {
         <LieferantDialog open={lieferantDialog} onClose={() => setLieferantDialog(false)} form={lieferantForm} setForm={setLieferantForm} onSave={lieferantSpeichern} editing={Boolean(lieferantId)} saving={speichert} />
         <KontaktDialog open={kontaktDialog} onClose={() => setKontaktDialog(false)} form={kontaktForm} setForm={setKontaktForm} onSave={kontaktSpeichern} editing={Boolean(kontaktId)} saving={speichert} />
         <AufgabeDialog open={aufgabeDialog} onClose={() => setAufgabeDialog(false)} form={aufgabeForm} setForm={setAufgabeForm} onSave={aufgabeSpeichern} editing={Boolean(aufgabeId)} saving={speichert} />
+        <VertragDialog open={vertragDialog} onClose={() => setVertragDialog(false)} form={vertragForm} setForm={setVertragForm} onSave={vertragSpeichern} editing={Boolean(vertragId)} saving={speichert} />
       </Box>
     );
   }
@@ -986,7 +1173,10 @@ export default function CRM() {
         <Box><Typography variant={mobil ? "h5" : "h4"} fontWeight={900}>Lieferanten-CRM</Typography><Typography color="text.secondary">Lieferanten, Ansprechpartner, Aufgaben und Verhandlungen zentral verwalten.</Typography></Box>
         <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
           <Button variant="outlined" startIcon={<AutoFixHighIcon />} onClick={importOeffnen}>Dokument einlesen</Button>
-          <Button variant="contained" startIcon={<AddIcon />} onClick={lieferantNeu}>Neuer Lieferant</Button>
+          <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
+            <Button variant="outlined" startIcon={<PictureAsPdfIcon />} onClick={lieferantenPdfOeffnen}>Lieferanten-PDF</Button>
+            <Button variant="contained" startIcon={<AddIcon />} onClick={lieferantNeu}>Neuer Lieferant</Button>
+          </Stack>
         </Stack>
       </Stack>
 
@@ -1021,6 +1211,7 @@ export default function CRM() {
                   <Stack direction="row" justifyContent="space-between"><Typography color="text.secondary">Ansprechpartner</Typography><Typography fontWeight={700}>{anzahlKontakte}</Typography></Stack>
                   <Stack direction="row" justifyContent="space-between"><Typography color="text.secondary">Offene Aufgaben</Typography><Typography fontWeight={700}>{offen}</Typography></Stack>
                   <Stack direction="row" justifyContent="space-between"><Typography color="text.secondary">Verhandlungen</Typography><Typography fontWeight={700}>{verhandlungen.filter((v) => v.lieferantId === lieferant.id).length}</Typography></Stack>
+                  <Stack direction="row" justifyContent="space-between"><Typography color="text.secondary">Verträge</Typography><Typography fontWeight={700}>{vertraege.filter((v) => v.lieferantId === lieferant.id).length}</Typography></Stack>
                 </CardContent>
               </Card>
             </Grid>
@@ -1028,6 +1219,16 @@ export default function CRM() {
         })}
         {gefiltert.length === 0 && <Grid size={{ xs: 12 }}><Alert severity="info">Keine Lieferanten gefunden.</Alert></Grid>}
       </Grid>
+
+      <Dialog open={pdfDialog} onClose={() => setPdfDialog(false)} fullWidth maxWidth="md">
+        <DialogTitle>Lieferanten als PDF ausgeben</DialogTitle>
+        <DialogContent dividers>
+          <Typography color="text.secondary" mb={2}>Wähle die Lieferanten aus. Im Druckdialog kannst du anschließend „Als PDF speichern“ wählen.</Typography>
+          <Stack direction="row" spacing={1} mb={2}><Button size="small" onClick={() => setPdfAuswahl(gefiltert.map((lieferant) => lieferant.id))}>Gefilterte auswählen</Button><Button size="small" onClick={() => setPdfAuswahl([])}>Auswahl löschen</Button></Stack>
+          <Stack spacing={1}>{gefiltert.map((lieferant) => <Paper key={lieferant.id} variant="outlined" sx={{ p: 1 }}><FormControlLabel control={<Checkbox checked={pdfAuswahl.includes(lieferant.id)} onChange={() => pdfAuswahlUmschalten(lieferant.id)} />} label={<Box><Typography fontWeight={800}>{lieferant.firma}</Typography><Typography variant="body2" color="text.secondary">{lieferant.kategorie || "—"} · {lieferant.ort || "Kein Ort"} · {vertraege.filter((vertrag) => vertrag.lieferantId === lieferant.id).length} Vertrag/Verträge</Typography></Box>} /></Paper>)}</Stack>
+        </DialogContent>
+        <DialogActions><Button onClick={() => setPdfDialog(false)}>Abbrechen</Button><Button variant="contained" startIcon={<PictureAsPdfIcon />} onClick={lieferantenAlsPdfDrucken} disabled={!pdfAuswahl.length}>PDF-Druck öffnen</Button></DialogActions>
+      </Dialog>
 
       <LieferantenImportDialog
         open={importDialog}
@@ -1250,6 +1451,14 @@ function LieferantDialog({ open, onClose, form, setForm, onSave, editing, saving
   const change = (e) => setForm((prev) => ({ ...prev, [e.target.name]: e.target.value }));
   const field = (name, label, extra = {}) => <TextField fullWidth name={name} label={label} value={form[name] || ""} onChange={change} {...extra} />;
   return <Dialog open={open} onClose={onClose} fullWidth maxWidth="md"><DialogTitle>{editing ? "Lieferant bearbeiten" : "Neuen Lieferanten anlegen"}</DialogTitle><DialogContent><Grid container spacing={2} mt={0.5}><Grid size={{ xs: 12, md: 8 }}>{field("firma", "Firma", { required: true })}</Grid><Grid size={{ xs: 12, md: 4 }}>{field("status", "Status", { select: true, children: [<MenuItem key="a" value="Aktiv">Aktiv</MenuItem>, <MenuItem key="i" value="Inaktiv">Inaktiv</MenuItem>] })}</Grid><Grid size={{ xs: 12, md: 6 }}>{field("kategorie", "Kategorie", { select: true, children: ["Material", "Maschine", "Fahrzeug", "Dienstleistung", "Personal", "Sonstiges"].map((x) => <MenuItem key={x} value={x}>{x}</MenuItem>) })}</Grid><Grid size={{ xs: 12, md: 6 }}>{field("kundennummer", "Kundennummer")}</Grid><Grid size={{ xs: 12 }}>{field("strasse", "Straße und Hausnummer")}</Grid><Grid size={{ xs: 12, sm: 4 }}>{field("plz", "PLZ")}</Grid><Grid size={{ xs: 12, sm: 8 }}>{field("ort", "Ort")}</Grid><Grid size={{ xs: 12, md: 6 }}>{field("telefon", "Telefon")}</Grid><Grid size={{ xs: 12, md: 6 }}>{field("email", "E-Mail")}</Grid><Grid size={{ xs: 12 }}>{field("website", "Website")}</Grid><Grid size={{ xs: 12, md: 6 }}>{field("zahlungsziel", "Zahlungsziel")}</Grid><Grid size={{ xs: 12, md: 6 }}>{field("skonto", "Skonto")}</Grid><Grid size={{ xs: 12, md: 6 }}>{field("standardrabatt", "Standardrabatt")}</Grid><Grid size={{ xs: 12, md: 6 }}>{field("bonusvereinbarung", "Bonusvereinbarung")}</Grid><Grid size={{ xs: 12 }}>{field("lieferbedingungen", "Lieferbedingungen")}</Grid><Grid size={{ xs: 12 }}>{field("notizen", "Notizen", { multiline: true, minRows: 3 })}</Grid></Grid></DialogContent><DialogActions><Button onClick={onClose}>Abbrechen</Button><Button variant="contained" onClick={onSave} disabled={saving || !form.firma.trim()}>{saving ? "Speichert…" : "Speichern"}</Button></DialogActions></Dialog>;
+}
+
+function VertragDialog({ open, onClose, form, setForm, onSave, editing, saving }) {
+  const change = (event) => {
+    const { name, value, checked, type } = event.target;
+    setForm((vorher) => ({ ...vorher, [name]: type === "checkbox" ? checked : value }));
+  };
+  return <Dialog open={open} onClose={onClose} fullWidth maxWidth="md"><DialogTitle>{editing ? "Vertrag bearbeiten" : "Vertrag hinzufügen"}</DialogTitle><DialogContent><Grid container spacing={2} mt={0.5}><Grid size={{ xs: 12, md: 8 }}><TextField fullWidth required name="name" label="Vertragsbezeichnung" value={form.name} onChange={change} /></Grid><Grid size={{ xs: 12, md: 4 }}><TextField fullWidth name="vertragsnummer" label="Vertragsnummer" value={form.vertragsnummer} onChange={change} /></Grid><Grid size={{ xs: 12, md: 6 }}><TextField fullWidth name="kategorie" label="Vertragsart" value={form.kategorie} onChange={change} /></Grid><Grid size={{ xs: 12, md: 6 }}><TextField fullWidth select name="status" label="Status" value={form.status} onChange={change}>{["Aktiv", "Gekündigt", "Abgelaufen", "Entwurf"].map((wert) => <MenuItem key={wert} value={wert}>{wert}</MenuItem>)}</TextField></Grid><Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth type="date" name="startdatum" label="Vertragsbeginn" value={form.startdatum} onChange={change} slotProps={{ inputLabel: { shrink: true } }} /></Grid><Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth type="date" name="enddatum" label="Vertragsende" value={form.enddatum} onChange={change} slotProps={{ inputLabel: { shrink: true } }} /></Grid><Grid size={{ xs: 12, md: 6 }}><TextField fullWidth name="kuendigungsfrist" label="Kündigungsfrist" placeholder="z. B. 3 Monate zum Laufzeitende" value={form.kuendigungsfrist} onChange={change} /></Grid><Grid size={{ xs: 12, md: 6 }}><FormControlLabel control={<Switch name="automatischeVerlaengerung" checked={Boolean(form.automatischeVerlaengerung)} onChange={change} />} label="Automatische Verlängerung" /></Grid><Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth name="kosten" label="Kosten" placeholder="z. B. 1250,00 €" value={form.kosten} onChange={change} /></Grid><Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth select name="kostenIntervall" label="Kostenintervall" value={form.kostenIntervall} onChange={change}>{["Monatlich", "Quartalsweise", "Jährlich", "Einmalig"].map((wert) => <MenuItem key={wert} value={wert}>{wert}</MenuItem>)}</TextField></Grid><Grid size={{ xs: 12 }}><TextField fullWidth name="ansprechpartner" label="Ansprechpartner" value={form.ansprechpartner} onChange={change} /></Grid><Grid size={{ xs: 12 }}><TextField fullWidth multiline minRows={3} name="notizen" label="Notizen" value={form.notizen} onChange={change} /></Grid></Grid></DialogContent><DialogActions><Button onClick={onClose}>Abbrechen</Button><Button variant="contained" onClick={onSave} disabled={saving || !form.name.trim()}>{saving ? "Speichert…" : "Speichern"}</Button></DialogActions></Dialog>;
 }
 
 function KontaktDialog({ open, onClose, form, setForm, onSave, editing, saving }) {

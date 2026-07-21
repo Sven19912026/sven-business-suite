@@ -34,7 +34,6 @@ import EventBusyIcon from '@mui/icons-material/EventBusy'
 import ExpandLessIcon from '@mui/icons-material/ExpandLess'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import FactCheckIcon from '@mui/icons-material/FactCheck'
-import LinkIcon from '@mui/icons-material/Link'
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf'
 import {
   addDoc,
@@ -517,6 +516,9 @@ export default function Vertraege() {
   const [vertragId, setVertragId] = useState(null)
   const [form, setForm] = useState(LEERER_VERTRAG)
   const [speichert, setSpeichert] = useState(false)
+  const [lieferantDialogOffen, setLieferantDialogOffen] = useState(false)
+  const [lieferantForm, setLieferantForm] = useState(LEERER_LIEFERANT)
+  const [offeneLieferanten, setOffeneLieferanten] = useState({})
 
   const [importDialogOffen, setImportDialogOffen] = useState(false)
   const [importLaedt, setImportLaedt] = useState(false)
@@ -593,6 +595,63 @@ export default function Vertraege() {
         .some((wert) => String(wert || '').toLowerCase().includes(term)))
       .sort((a, b) => String(a.enddatum || '9999-12-31').localeCompare(String(b.enddatum || '9999-12-31')))
   }, [vertraege, suche, statusFilter, kategorieFilter])
+
+
+  const lieferantenGruppen = useMemo(() => {
+    const gruppen = lieferanten
+      .map((lieferant) => ({
+        lieferant,
+        vertraege: gefilterteVertraege.filter((vertrag) => vertrag.lieferantId === lieferant.id),
+      }))
+      .filter((gruppe) => gruppe.vertraege.length > 0 || (!suche.trim() && statusFilter !== 'Alle'))
+      .sort((a, b) => String(a.lieferant.firma || '').localeCompare(String(b.lieferant.firma || ''), 'de'))
+
+    const unzugeordnet = gefilterteVertraege.filter((vertrag) => !vertrag.lieferantId || !lieferanten.some((lieferant) => lieferant.id === vertrag.lieferantId))
+    if (unzugeordnet.length) gruppen.push({ lieferant: { id: '__unzugeordnet__', firma: 'Nicht zugeordnete Verträge' }, vertraege: unzugeordnet })
+    return gruppen
+  }, [lieferanten, gefilterteVertraege, suche, statusFilter])
+
+  function neuerLieferant() {
+    setLieferantForm(LEERER_LIEFERANT)
+    setLieferantDialogOffen(true)
+  }
+
+  async function lieferantSpeichern() {
+    if (!user || !lieferantForm.firma.trim()) return
+    setSpeichert(true)
+    setFehler('')
+    try {
+      await addDoc(collection(db, 'lieferanten'), {
+        ...lieferantForm,
+        firma: lieferantForm.firma.trim(),
+        userId: user.uid,
+        erstelltAm: serverTimestamp(),
+        aktualisiertAm: serverTimestamp(),
+      })
+      setLieferantDialogOffen(false)
+      setLieferantForm(LEERER_LIEFERANT)
+      setMeldung('Lieferant erfolgreich angelegt.')
+    } catch (error) {
+      console.error(error)
+      setFehler('Lieferant konnte nicht gespeichert werden.')
+    } finally {
+      setSpeichert(false)
+    }
+  }
+
+  function vertragFuerLieferant(lieferant) {
+    setVertragId(null)
+    setForm({
+      ...LEERER_VERTRAG,
+      lieferantId: lieferant.id === '__unzugeordnet__' ? '' : lieferant.id,
+      anbieter: lieferant.id === '__unzugeordnet__' ? '' : lieferant.firma,
+    })
+    setDialogOffen(true)
+  }
+
+  function lieferantAufklappen(id) {
+    setOffeneLieferanten((vorher) => ({ ...vorher, [id]: !vorher[id] }))
+  }
 
   function neuerVertrag() {
     setVertragId(null)
@@ -850,11 +909,12 @@ export default function Vertraege() {
             <Typography variant="overline" color="primary" fontWeight={800}>Business Suite 4.2</Typography>
             <Typography variant="h4" fontWeight={800}>Vertragsverwaltung</Typography>
             <Typography color="text.secondary" mt={0.5}>
-              Laufzeiten, Kündigungsfristen und Kosten verwalten oder Daten lokal aus PDFs übernehmen.
+              Lieferanten anlegen und darunter mehrere Verträge wie Rahmenverträge oder Nachträge verwalten. PDFs werden nur lokal ausgelesen und nicht gespeichert.
             </Typography>
           </Box>
           <Stack direction={{ xs: 'column', sm: 'row' }} gap={1}>
             <Button startIcon={<PictureAsPdfIcon />} variant="outlined" onClick={pdfImportOeffnen}>PDF importieren</Button>
+            <Button startIcon={<AddIcon />} variant="outlined" onClick={neuerLieferant}>Neuer Lieferant</Button>
             <Button startIcon={<AddIcon />} variant="contained" onClick={neuerVertrag}>Neuer Vertrag</Button>
           </Stack>
         </Stack>
@@ -884,58 +944,93 @@ export default function Vertraege() {
       </Paper>
 
       <Stack spacing={1.5}>
-        {!gefilterteVertraege.length && (
+        {!lieferantenGruppen.length && (
           <Paper sx={{ p: 5, textAlign: 'center' }}>
             <DescriptionIcon color="disabled" sx={{ fontSize: 56 }} />
-            <Typography variant="h6" fontWeight={700} mt={1}>Keine Verträge gefunden</Typography>
-            <Typography color="text.secondary">Lege einen Vertrag an oder importiere eine PDF-Datei.</Typography>
+            <Typography variant="h6" fontWeight={700} mt={1}>Keine Lieferanten oder Verträge gefunden</Typography>
+            <Typography color="text.secondary">Lege zuerst einen Lieferanten und anschließend beliebig viele Verträge an.</Typography>
           </Paper>
         )}
 
-        {gefilterteVertraege.map((vertrag) => {
-          const frist = kuendigungsdatum(vertrag.enddatum, vertrag.kuendigungsfristMonate)
-          const fristKritisch = vertrag.status === 'Aktiv' && frist && frist >= heute && frist <= in90Tagen
-          const fristAbgelaufen = vertrag.status === 'Aktiv' && frist && frist < heute
+        {lieferantenGruppen.map(({ lieferant, vertraege: gruppenVertraege }) => {
+          const istOffen = offeneLieferanten[lieferant.id] !== false
           return (
-            <Card key={vertrag.id} variant="outlined" sx={{ borderColor: fristKritisch || fristAbgelaufen ? 'error.main' : 'divider' }}>
-              <CardContent>
-                <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" gap={2}>
-                  <Box sx={{ minWidth: 0, flexGrow: 1 }}>
-                    <Stack direction="row" gap={1} alignItems="center" flexWrap="wrap">
-                      <Typography variant="h6" fontWeight={800}>{vertrag.name}</Typography>
-                      <Chip size="small" label={vertrag.status || 'Aktiv'} color={vertrag.status === 'Aktiv' ? 'success' : 'default'} />
-                      <Chip size="small" variant="outlined" label={vertrag.kategorie || 'Sonstiges'} />
-                      {vertrag.importQuelle && <Chip size="small" color="info" variant="outlined" icon={<PictureAsPdfIcon />} label="PDF-Import" />}
-                    </Stack>
-                    <Typography color="text.secondary" mt={0.5}>{vertrag.anbieter || 'Kein Anbieter eingetragen'}</Typography>
-
-                    <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)', lg: 'repeat(4, 1fr)' }, gap: 1.5, mt: 2 }}>
-                      <Box><Typography variant="caption" color="text.secondary">Laufzeit</Typography><Typography fontWeight={700}>{datumFormatieren(vertrag.startdatum)} – {datumFormatieren(vertrag.enddatum)}</Typography></Box>
-                      <Box><Typography variant="caption" color="text.secondary">Kündigungsfrist</Typography><Typography fontWeight={700} color={fristKritisch || fristAbgelaufen ? 'error.main' : 'text.primary'}>{frist ? datumFormatieren(frist) : 'Keine Frist'}</Typography></Box>
-                      <Box><Typography variant="caption" color="text.secondary">Kosten</Typography><Typography fontWeight={700}>{geldFormatieren(vertrag.kosten)} {vertrag.kostenIntervall ? `/ ${vertrag.kostenIntervall}` : ''}</Typography></Box>
-                      <Box><Typography variant="caption" color="text.secondary">Ansprechpartner</Typography><Typography fontWeight={700}>{vertrag.ansprechpartner || '–'}</Typography></Box>
-                    </Box>
-
-                    <Stack direction="row" gap={1} flexWrap="wrap" mt={2}>
-                      {vertrag.automatischeVerlaengerung && <Chip size="small" icon={<AutorenewIcon />} label="Verlängert sich automatisch" color="warning" variant="outlined" />}
-                      {vertrag.vertragsnummer && <Chip size="small" label={`Nr. ${vertrag.vertragsnummer}`} variant="outlined" />}
-                      {vertrag.lieferantId && <Chip size="small" icon={<LinkIcon />} label="Mit Lieferant verknüpft" variant="outlined" />}
-                      {fristKritisch && <Chip size="small" label="Kündigungsfrist beachten" color="error" />}
-                      {fristAbgelaufen && <Chip size="small" label="Frist abgelaufen" color="error" />}
-                    </Stack>
-                    {vertrag.notizen && <Typography variant="body2" mt={2}><strong>Notiz:</strong> {vertrag.notizen}</Typography>}
+            <Paper key={lieferant.id} variant="outlined" sx={{ overflow: 'hidden' }}>
+              <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'stretch', sm: 'center' }} gap={1} sx={{ p: 2, bgcolor: 'action.hover' }}>
+                <Stack direction="row" alignItems="center" gap={1} sx={{ cursor: 'pointer', flexGrow: 1 }} onClick={() => lieferantAufklappen(lieferant.id)}>
+                  <IconButton size="small">{istOffen ? <ExpandLessIcon /> : <ExpandMoreIcon />}</IconButton>
+                  <Box>
+                    <Typography variant="h6" fontWeight={800}>{lieferant.firma}</Typography>
+                    <Typography variant="body2" color="text.secondary">{gruppenVertraege.length} Vertrag{gruppenVertraege.length === 1 ? '' : 'e'} hinterlegt</Typography>
                   </Box>
-
-                  <Stack direction="row" alignSelf={{ xs: 'flex-end', md: 'flex-start' }}>
-                    <Tooltip title="Bearbeiten"><IconButton onClick={() => vertragBearbeiten(vertrag)}><EditIcon /></IconButton></Tooltip>
-                    <Tooltip title="Löschen"><IconButton color="error" onClick={() => vertragLoeschen(vertrag)}><DeleteIcon /></IconButton></Tooltip>
-                  </Stack>
                 </Stack>
-              </CardContent>
-            </Card>
+                <Button size="small" variant="contained" startIcon={<AddIcon />} onClick={() => vertragFuerLieferant(lieferant)}>
+                  Vertrag hinzufügen
+                </Button>
+              </Stack>
+
+              <Collapse in={istOffen} timeout="auto">
+                <Stack spacing={1.25} sx={{ p: 2 }}>
+                  {!gruppenVertraege.length && <Typography color="text.secondary">Noch keine Verträge hinterlegt.</Typography>}
+                  {gruppenVertraege.map((vertrag) => {
+                    const frist = kuendigungsdatum(vertrag.enddatum, vertrag.kuendigungsfristMonate)
+                    const fristKritisch = vertrag.status === 'Aktiv' && frist && frist >= heute && frist <= in90Tagen
+                    const fristAbgelaufen = vertrag.status === 'Aktiv' && frist && frist < heute
+                    return (
+                      <Card key={vertrag.id} variant="outlined" sx={{ borderColor: fristKritisch || fristAbgelaufen ? 'error.main' : 'divider' }}>
+                        <CardContent>
+                          <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" gap={2}>
+                            <Box sx={{ minWidth: 0, flexGrow: 1 }}>
+                              <Stack direction="row" gap={1} alignItems="center" flexWrap="wrap">
+                                <Typography variant="h6" fontWeight={800}>{vertrag.name}</Typography>
+                                <Chip size="small" label={vertrag.status || 'Aktiv'} color={vertrag.status === 'Aktiv' ? 'success' : 'default'} />
+                                <Chip size="small" variant="outlined" label={vertrag.kategorie || 'Sonstiges'} />
+                              </Stack>
+                              <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)', lg: 'repeat(4, 1fr)' }, gap: 1.5, mt: 2 }}>
+                                <Box><Typography variant="caption" color="text.secondary">Laufzeit</Typography><Typography fontWeight={700}>{datumFormatieren(vertrag.startdatum)} – {datumFormatieren(vertrag.enddatum)}</Typography></Box>
+                                <Box><Typography variant="caption" color="text.secondary">Kündigungsfrist</Typography><Typography fontWeight={700} color={fristKritisch || fristAbgelaufen ? 'error.main' : 'text.primary'}>{frist ? datumFormatieren(frist) : 'Keine Frist'}</Typography></Box>
+                                <Box><Typography variant="caption" color="text.secondary">Kosten</Typography><Typography fontWeight={700}>{geldFormatieren(vertrag.kosten)} {vertrag.kostenIntervall ? `/ ${vertrag.kostenIntervall}` : ''}</Typography></Box>
+                                <Box><Typography variant="caption" color="text.secondary">Vertragsnummer</Typography><Typography fontWeight={700}>{vertrag.vertragsnummer || '–'}</Typography></Box>
+                              </Box>
+                              {vertrag.notizen && <Typography variant="body2" mt={2}><strong>Notiz:</strong> {vertrag.notizen}</Typography>}
+                            </Box>
+                            <Stack direction="row" alignSelf={{ xs: 'flex-end', md: 'flex-start' }}>
+                              <Tooltip title="Bearbeiten"><IconButton onClick={() => vertragBearbeiten(vertrag)}><EditIcon /></IconButton></Tooltip>
+                              <Tooltip title="Löschen"><IconButton color="error" onClick={() => vertragLoeschen(vertrag)}><DeleteIcon /></IconButton></Tooltip>
+                            </Stack>
+                          </Stack>
+                        </CardContent>
+                      </Card>
+                    )
+                  })}
+                </Stack>
+              </Collapse>
+            </Paper>
           )
         })}
       </Stack>
+
+      <Dialog open={lieferantDialogOffen} onClose={() => !speichert && setLieferantDialogOffen(false)} fullWidth maxWidth="sm">
+        <DialogTitle>Neuen Lieferanten anlegen</DialogTitle>
+        <DialogContent dividers>
+          <Stack spacing={2} sx={{ pt: 1 }}>
+            <TextField label="Firma / Dienstleister" value={lieferantForm.firma} onChange={(event) => setLieferantForm((vorher) => ({ ...vorher, firma: event.target.value }))} required autoFocus />
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+              <TextField fullWidth label="Kategorie" value={lieferantForm.kategorie} onChange={(event) => setLieferantForm((vorher) => ({ ...vorher, kategorie: event.target.value }))} />
+              <TextField fullWidth label="Kundennummer" value={lieferantForm.kundennummer} onChange={(event) => setLieferantForm((vorher) => ({ ...vorher, kundennummer: event.target.value }))} />
+            </Stack>
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+              <TextField fullWidth label="Telefon" value={lieferantForm.telefon} onChange={(event) => setLieferantForm((vorher) => ({ ...vorher, telefon: event.target.value }))} />
+              <TextField fullWidth type="email" label="E-Mail" value={lieferantForm.email} onChange={(event) => setLieferantForm((vorher) => ({ ...vorher, email: event.target.value }))} />
+            </Stack>
+            <TextField label="Notizen" value={lieferantForm.notizen} onChange={(event) => setLieferantForm((vorher) => ({ ...vorher, notizen: event.target.value }))} multiline minRows={3} />
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setLieferantDialogOffen(false)}>Abbrechen</Button>
+          <Button variant="contained" onClick={lieferantSpeichern} disabled={speichert || !lieferantForm.firma.trim()}>Lieferant speichern</Button>
+        </DialogActions>
+      </Dialog>
 
       <Dialog open={dialogOffen} onClose={() => !speichert && setDialogOffen(false)} fullWidth maxWidth="md">
         <DialogTitle>{vertragId ? 'Vertrag bearbeiten' : 'Neuen Vertrag anlegen'}</DialogTitle>

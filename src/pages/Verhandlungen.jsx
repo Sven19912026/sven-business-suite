@@ -1,10 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
+  Accordion,
+  AccordionDetails,
+  AccordionSummary,
   Box,
   Button,
   Card,
   CardContent,
+  Checkbox,
   Chip,
   Dialog,
   DialogActions,
@@ -48,6 +52,9 @@ import PersonIcon from "@mui/icons-material/Person";
 import PhoneIcon from "@mui/icons-material/Phone";
 import EmailIcon from "@mui/icons-material/Email";
 import RemoveCircleOutlineIcon from "@mui/icons-material/RemoveCircleOutlined";
+import PictureAsPdfIcon from "@mui/icons-material/PictureAsPdf";
+import DirectionsCarIcon from "@mui/icons-material/DirectionsCar";
+import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 
 import {
   addDoc,
@@ -100,6 +107,43 @@ const leerLieferantenFormular = {
   skonto: "",
   lieferbedingungen: "",
   notizen: "",
+};
+
+let fahrzeugZeilenZaehler = 0;
+
+function neuesFahrzeug() {
+  fahrzeugZeilenZaehler += 1;
+  return {
+    id: `fahrzeug-${Date.now()}-${fahrzeugZeilenZaehler}`,
+    hersteller: "",
+    modell: "",
+    ausstattung: "",
+    anzahl: "1",
+    listenpreis: "",
+    angebotspreis: "",
+    kennzeichenOderReferenz: "",
+  };
+}
+
+const leerFahrzeugFormular = {
+  lieferantId: "",
+  firma: "",
+  beschreibung: "",
+  beschaffungsart: "Leasing",
+  status: "Offen",
+  prioritaet: "Mittel",
+  ansprechpartner: "",
+  telefon: "",
+  email: "",
+  gewuenschterLiefertermin: "",
+  voraussichtlicherLiefertermin: "",
+  wiedervorlage: "",
+  laufzeitMonate: "",
+  leasingrate: "",
+  kaufpreis: "",
+  sonderzahlung: "",
+  notizen: "",
+  fahrzeuge: [],
 };
 
 function euroWert(wert) {
@@ -214,6 +258,18 @@ export default function Verhandlungen() {
   ]);
   const [rechnerKontext, setRechnerKontext] = useState("frei");
 
+  const [uebergabeDialogOffen, setUebergabeDialogOffen] = useState(false);
+  const [uebergabeAuswahl, setUebergabeAuswahl] = useState([]);
+
+  const [fahrzeugverhandlungen, setFahrzeugverhandlungen] = useState([]);
+  const [fahrzeugFormular, setFahrzeugFormular] = useState({
+    ...leerFahrzeugFormular,
+    fahrzeuge: [neuesFahrzeug()],
+  });
+  const [fahrzeugDialogOffen, setFahrzeugDialogOffen] = useState(false);
+  const [fahrzeugBearbeitungsId, setFahrzeugBearbeitungsId] = useState(null);
+  const [fahrzeugSuche, setFahrzeugSuche] = useState("");
+
   useEffect(() => {
     const benutzer = auth.currentUser;
 
@@ -229,6 +285,11 @@ export default function Verhandlungen() {
 
     const lieferantenAbfrage = query(
       collection(db, "lieferanten"),
+      where("userId", "==", benutzer.uid)
+    );
+
+    const fahrzeugAbfrage = query(
+      collection(db, "fahrzeugverhandlungen"),
       where("userId", "==", benutzer.uid)
     );
 
@@ -267,9 +328,28 @@ export default function Verhandlungen() {
       }
     );
 
+    const fahrzeugAbmelden = onSnapshot(
+      fahrzeugAbfrage,
+      (snapshot) => {
+        setFahrzeugverhandlungen(
+          snapshot.docs.map((eintrag) => ({
+            id: eintrag.id,
+            ...eintrag.data(),
+          }))
+        );
+      },
+      (error) => {
+        console.error(error);
+        setFehler(
+          "Die Fahrzeugverhandlungen konnten nicht geladen werden. Bitte Firestore-Regeln prüfen."
+        );
+      }
+    );
+
     return () => {
       verhandlungenAbmelden();
       lieferantenAbmelden();
+      fahrzeugAbmelden();
     };
   }, []);
 
@@ -399,6 +479,36 @@ export default function Verhandlungen() {
     lieferantenKategorieFilter,
     lieferantenStatusFilter,
   ]);
+
+  const gefilterteFahrzeugverhandlungen = useMemo(() => {
+    const suchbegriff = fahrzeugSuche.trim().toLowerCase();
+
+    return [...fahrzeugverhandlungen]
+      .filter((eintrag) => {
+        const fahrzeugText = (eintrag.fahrzeuge || [])
+          .map((fahrzeug) =>
+            [fahrzeug.hersteller, fahrzeug.modell, fahrzeug.ausstattung]
+              .filter(Boolean)
+              .join(" ")
+          )
+          .join(" ")
+          .toLowerCase();
+
+        return (
+          !suchbegriff ||
+          eintrag.firma?.toLowerCase().includes(suchbegriff) ||
+          eintrag.beschreibung?.toLowerCase().includes(suchbegriff) ||
+          eintrag.beschaffungsart?.toLowerCase().includes(suchbegriff) ||
+          eintrag.status?.toLowerCase().includes(suchbegriff) ||
+          fahrzeugText.includes(suchbegriff)
+        );
+      })
+      .sort((a, b) =>
+        String(a.gewuenschterLiefertermin || "9999-12-31").localeCompare(
+          String(b.gewuenschterLiefertermin || "9999-12-31")
+        )
+      );
+  }, [fahrzeugverhandlungen, fahrzeugSuche]);
 
   function sortieren(feld) {
     if (sortierung === feld) {
@@ -706,10 +816,240 @@ export default function Verhandlungen() {
     setRechnerOffen(false);
   }
 
+  function neuesFahrzeugVorhabenOeffnen() {
+    setFahrzeugFormular({
+      ...leerFahrzeugFormular,
+      fahrzeuge: [neuesFahrzeug()],
+    });
+    setFahrzeugBearbeitungsId(null);
+    setFehler("");
+    setFahrzeugDialogOffen(true);
+  }
+
+  function fahrzeugVorhabenBearbeiten(eintrag) {
+    setFahrzeugFormular({
+      ...leerFahrzeugFormular,
+      ...eintrag,
+      fahrzeuge: (eintrag.fahrzeuge || []).length
+        ? eintrag.fahrzeuge.map((fahrzeug) => ({
+            ...neuesFahrzeug(),
+            ...fahrzeug,
+          }))
+        : [neuesFahrzeug()],
+    });
+    setFahrzeugBearbeitungsId(eintrag.id);
+    setFehler("");
+    setFahrzeugDialogOffen(true);
+  }
+
+  function fahrzeugFeldAendern(event) {
+    const { name, value } = event.target;
+
+    if (name === "lieferantId") {
+      const ausgewaehlt = lieferanten.find((lieferant) => lieferant.id === value);
+      setFahrzeugFormular((vorher) => ({
+        ...vorher,
+        lieferantId: value,
+        firma: ausgewaehlt?.firma || vorher.firma,
+        ansprechpartner: ausgewaehlt?.ansprechpartner || vorher.ansprechpartner,
+        telefon: ausgewaehlt?.mobil || ausgewaehlt?.telefon || vorher.telefon,
+        email: ausgewaehlt?.kontaktEmail || ausgewaehlt?.email || vorher.email,
+      }));
+      return;
+    }
+
+    setFahrzeugFormular((vorher) => ({ ...vorher, [name]: value }));
+  }
+
+  function fahrzeugZeileAendern(id, feld, wert) {
+    setFahrzeugFormular((vorher) => ({
+      ...vorher,
+      fahrzeuge: vorher.fahrzeuge.map((fahrzeug) =>
+        fahrzeug.id === id ? { ...fahrzeug, [feld]: wert } : fahrzeug
+      ),
+    }));
+  }
+
+  function fahrzeugZeileHinzufuegen() {
+    setFahrzeugFormular((vorher) => ({
+      ...vorher,
+      fahrzeuge: [...vorher.fahrzeuge, neuesFahrzeug()],
+    }));
+  }
+
+  function fahrzeugZeileEntfernen(id) {
+    setFahrzeugFormular((vorher) => ({
+      ...vorher,
+      fahrzeuge:
+        vorher.fahrzeuge.length > 1
+          ? vorher.fahrzeuge.filter((fahrzeug) => fahrzeug.id !== id)
+          : vorher.fahrzeuge,
+    }));
+  }
+
+  async function fahrzeugVorhabenSpeichern() {
+    if (!fahrzeugFormular.firma.trim()) {
+      setFehler("Bitte einen Händler oder Lieferanten eintragen.");
+      return;
+    }
+
+    const fahrzeuge = fahrzeugFormular.fahrzeuge
+      .map((fahrzeug) => ({
+        ...fahrzeug,
+        hersteller: fahrzeug.hersteller.trim(),
+        modell: fahrzeug.modell.trim(),
+        anzahl: Math.max(Number(fahrzeug.anzahl) || 1, 1),
+        listenpreis: euroWert(fahrzeug.listenpreis),
+        angebotspreis: euroWert(fahrzeug.angebotspreis),
+      }))
+      .filter((fahrzeug) => fahrzeug.hersteller || fahrzeug.modell);
+
+    if (!fahrzeuge.length) {
+      setFehler("Bitte mindestens ein Fahrzeug mit Hersteller oder Modell eintragen.");
+      return;
+    }
+
+    const benutzer = auth.currentUser;
+    if (!benutzer) {
+      setFehler("Kein Benutzer angemeldet.");
+      return;
+    }
+
+    setSpeichert(true);
+    setFehler("");
+
+    const daten = {
+      ...fahrzeugFormular,
+      firma: fahrzeugFormular.firma.trim(),
+      fahrzeuge,
+      leasingrate: euroWert(fahrzeugFormular.leasingrate),
+      kaufpreis: euroWert(fahrzeugFormular.kaufpreis),
+      sonderzahlung: euroWert(fahrzeugFormular.sonderzahlung),
+      userId: benutzer.uid,
+      geaendertAm: serverTimestamp(),
+    };
+
+    try {
+      if (fahrzeugBearbeitungsId) {
+        await updateDoc(
+          doc(db, "fahrzeugverhandlungen", fahrzeugBearbeitungsId),
+          daten
+        );
+      } else {
+        await addDoc(collection(db, "fahrzeugverhandlungen"), {
+          ...daten,
+          erstelltAm: serverTimestamp(),
+        });
+      }
+      setFahrzeugDialogOffen(false);
+      setFahrzeugBearbeitungsId(null);
+    } catch (error) {
+      console.error(error);
+      setFehler("Die Fahrzeugverhandlung konnte nicht gespeichert werden.");
+    } finally {
+      setSpeichert(false);
+    }
+  }
+
+  async function fahrzeugVorhabenLoeschen(eintrag) {
+    if (!window.confirm(`Fahrzeugverhandlung mit "${eintrag.firma}" wirklich löschen?`)) return;
+    try {
+      await deleteDoc(doc(db, "fahrzeugverhandlungen", eintrag.id));
+    } catch (error) {
+      console.error(error);
+      setFehler("Die Fahrzeugverhandlung konnte nicht gelöscht werden.");
+    }
+  }
+
   function prioritaetsFarbe(prioritaet) {
     if (prioritaet === "Hoch") return "error";
     if (prioritaet === "Mittel") return "warning";
     return "default";
+  }
+
+  const uebergabeVerhandlungen = useMemo(() => {
+    const offen = verhandlungen
+      .filter((eintrag) => eintrag.status === "Offen" || eintrag.status === "In Verhandlung")
+      .sort((a, b) => String(a.wiedervorlage || "9999-12-31").localeCompare(String(b.wiedervorlage || "9999-12-31")));
+    const erledigt = verhandlungen
+      .filter((eintrag) => eintrag.status === "Gewonnen" || eintrag.status === "Verloren")
+      .sort((a, b) => (b.aktualisiertAm?.seconds || b.erstelltAm?.seconds || 0) - (a.aktualisiertAm?.seconds || a.erstelltAm?.seconds || 0))
+      .slice(0, 10);
+    return [...offen, ...erledigt];
+  }, [verhandlungen]);
+
+  function uebergabeOeffnen() {
+    setUebergabeAuswahl(uebergabeVerhandlungen.map((eintrag) => eintrag.id));
+    setUebergabeDialogOffen(true);
+  }
+
+  function uebergabeUmschalten(id) {
+    setUebergabeAuswahl((vorher) => vorher.includes(id)
+      ? vorher.filter((wert) => wert !== id)
+      : [...vorher, id]);
+  }
+
+  function htmlSicher(value) {
+    return String(value ?? "").replace(/[&<>"']/g, (zeichen) => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;",
+    }[zeichen]));
+  }
+
+  function uebergabeAlsPdfDrucken() {
+    const auswahl = uebergabeVerhandlungen.filter((eintrag) => uebergabeAuswahl.includes(eintrag.id));
+    if (!auswahl.length) return;
+    const zeilen = auswahl.map((eintrag) => `
+      <tr>
+        <td>${htmlSicher(eintrag.status)}</td>
+        <td><strong>${htmlSicher(eintrag.firma)}</strong><br>${htmlSicher(eintrag.verhandlungsgegenstand || "Kein Gegenstand hinterlegt")}</td>
+        <td><strong>${htmlSicher(eintrag.ansprechpartner || "—")}</strong><br><small>${htmlSicher(eintrag.telefon || "Keine Telefonnummer")}<br>${htmlSicher(eintrag.email || "Keine E-Mail")}</small></td>
+        <td>${htmlSicher(eintrag.wiedervorlage ? datumFormat(eintrag.wiedervorlage) : "—")}</td>
+        <td>${htmlSicher(euroFormat(eintrag.aktuellesAngebot))}<br><small>Ersparnis: ${htmlSicher(euroFormat(einsparung(eintrag)))} (${htmlSicher(prozentFormat(einsparungProzent(eintrag)))})</small></td>
+        <td>${htmlSicher(eintrag.notizen || "—")}</td>
+      </tr>`).join("");
+    const druckHtml = `<!doctype html><html><head><meta charset="utf-8"><title>Urlaubsübergabe Verhandlungen</title><style>body{font-family:Arial,sans-serif;color:#172033;margin:28px}h1{margin:0 0 6px}.meta{color:#667085;margin-bottom:22px}table{width:100%;border-collapse:collapse;font-size:11px}th,td{border:1px solid #d0d5dd;padding:8px;vertical-align:top;text-align:left}th{background:#f2f4f7}tr{page-break-inside:avoid}@page{size:landscape;margin:10mm}@media print{body{margin:0}}</style></head><body><h1>Urlaubsübergabe – Verhandlungen</h1><div class="meta">Erstellt am ${new Date().toLocaleString("de-DE")} · ${auswahl.length} ausgewählte Verhandlung(en)</div><table><thead><tr><th>Status</th><th>Firma / Gegenstand</th><th>Ansprechpartner / Kontakt</th><th>Wiedervorlage</th><th>Aktueller Stand</th><th>Notizen</th></tr></thead><tbody>${zeilen}</tbody></table></body></html>`;
+
+    // Drucken über ein unsichtbares iFrame statt über window.open().
+    // Dadurch wird kein Pop-up geöffnet und Chrome blockiert den PDF-Druck nicht.
+    const vorhandenesIframe = document.getElementById("verhandlungen-druck-iframe");
+    if (vorhandenesIframe) vorhandenesIframe.remove();
+
+    const iframe = document.createElement("iframe");
+    iframe.id = "verhandlungen-druck-iframe";
+    iframe.setAttribute("title", "Druckansicht Urlaubsübergabe");
+    iframe.style.position = "fixed";
+    iframe.style.right = "0";
+    iframe.style.bottom = "0";
+    iframe.style.width = "0";
+    iframe.style.height = "0";
+    iframe.style.border = "0";
+    iframe.style.visibility = "hidden";
+    document.body.appendChild(iframe);
+
+    const druckDokument = iframe.contentDocument || iframe.contentWindow?.document;
+    if (!druckDokument || !iframe.contentWindow) {
+      iframe.remove();
+      setFehler("Die Druckansicht konnte nicht erstellt werden.");
+      return;
+    }
+
+    druckDokument.open();
+    druckDokument.write(druckHtml);
+    druckDokument.close();
+
+    setUebergabeDialogOffen(false);
+    setFehler("");
+
+    window.setTimeout(() => {
+      try {
+        iframe.contentWindow.focus();
+        iframe.contentWindow.print();
+      } catch {
+        setFehler("Der Druckdialog konnte nicht geöffnet werden.");
+      }
+    }, 250);
+
+    window.setTimeout(() => iframe.remove(), 60000);
   }
 
   function statusFarbe(status) {
@@ -754,10 +1094,10 @@ export default function Verhandlungen() {
       >
         <Box>
           <Typography variant="h4" fontWeight={800}>
-            Verhandlungen & Lieferanten
+            Verhandlungen, Fahrzeuge & Lieferanten
           </Typography>
           <Typography color="text.secondary">
-            Preise, Verhandlungsgegenstände, Kontakte, Konditionen und
+            Preise, Fahrzeuge, Liefertermine, Kontakte, Konditionen und
             Wiedervorlagen verwalten
           </Typography>
         </Box>
@@ -767,6 +1107,16 @@ export default function Verhandlungen() {
           spacing={1}
           alignSelf={{ xs: "stretch", md: "center" }}
         >
+          {ansicht === "verhandlungen" && (
+            <Button
+              variant="outlined"
+              startIcon={<PictureAsPdfIcon />}
+              onClick={uebergabeOeffnen}
+              sx={{ minHeight: 48, px: 2.5, whiteSpace: "nowrap" }}
+            >
+              Urlaubsübergabe PDF
+            </Button>
+          )}
           {ansicht === "verhandlungen" && (
             <Button
               variant="outlined"
@@ -783,13 +1133,17 @@ export default function Verhandlungen() {
             onClick={
               ansicht === "verhandlungen"
                 ? neueVerhandlungOeffnen
-                : neuerLieferantOeffnen
+                : ansicht === "fahrzeuge"
+                  ? neuesFahrzeugVorhabenOeffnen
+                  : neuerLieferantOeffnen
             }
             sx={{ minHeight: 48, px: 3, whiteSpace: "nowrap" }}
           >
             {ansicht === "verhandlungen"
               ? "Neue Verhandlung"
-              : "Neuer Lieferant"}
+              : ansicht === "fahrzeuge"
+                ? "Fahrzeug hinzufügen"
+                : "Neuer Lieferant"}
           </Button>
         </Stack>
       </Stack>
@@ -805,6 +1159,12 @@ export default function Verhandlungen() {
             label={`Verhandlungen (${verhandlungen.length})`}
           />
           <Tab
+            value="fahrzeuge"
+            icon={<DirectionsCarIcon />}
+            iconPosition="start"
+            label={`Fahrzeuge (${fahrzeugverhandlungen.length})`}
+          />
+          <Tab
             value="lieferanten"
             label={`Lieferanten (${lieferanten.length})`}
           />
@@ -817,7 +1177,80 @@ export default function Verhandlungen() {
         </Alert>
       )}
 
-      {ansicht === "verhandlungen" ? (
+      {ansicht === "fahrzeuge" ? (
+        <>
+          <Grid container spacing={2} mb={3}>
+            <Grid size={{ xs: 12, sm: 4 }}>
+              <Card><CardContent><Typography color="text.secondary" fontWeight={700}>Fahrzeugvorhaben</Typography><Typography variant="h4" fontWeight={800}>{fahrzeugverhandlungen.length}</Typography></CardContent></Card>
+            </Grid>
+            <Grid size={{ xs: 12, sm: 4 }}>
+              <Card><CardContent><Typography color="text.secondary" fontWeight={700}>Leasing</Typography><Typography variant="h4" fontWeight={800}>{fahrzeugverhandlungen.filter((eintrag) => eintrag.beschaffungsart === "Leasing").length}</Typography></CardContent></Card>
+            </Grid>
+            <Grid size={{ xs: 12, sm: 4 }}>
+              <Card><CardContent><Typography color="text.secondary" fontWeight={700}>Kauf</Typography><Typography variant="h4" fontWeight={800}>{fahrzeugverhandlungen.filter((eintrag) => eintrag.beschaffungsart === "Kauf").length}</Typography></CardContent></Card>
+            </Grid>
+          </Grid>
+
+          <Paper sx={{ p: 2, mb: 2 }}>
+            <TextField
+              fullWidth
+              label="Fahrzeuge suchen"
+              placeholder="Händler, Hersteller, Modell, Leasing, Kauf oder Status"
+              value={fahrzeugSuche}
+              onChange={(event) => setFahrzeugSuche(event.target.value)}
+              slotProps={{ input: { startAdornment: <InputAdornment position="start"><SearchIcon /></InputAdornment> } }}
+            />
+          </Paper>
+
+          <Stack spacing={1.5}>
+            {gefilterteFahrzeugverhandlungen.map((eintrag) => (
+              <Accordion key={eintrag.id} disableGutters>
+                <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                  <Stack direction={{ xs: "column", md: "row" }} spacing={1.5} alignItems={{ xs: "flex-start", md: "center" }} sx={{ width: "100%", pr: 1 }}>
+                    <DirectionsCarIcon color="primary" />
+                    <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+                      <Typography fontWeight={800}>{eintrag.firma}</Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        {eintrag.beschreibung || `${(eintrag.fahrzeuge || []).length} Fahrzeug(e)`}
+                      </Typography>
+                    </Box>
+                    <Chip size="small" label={eintrag.beschaffungsart || "—"} color="primary" variant="outlined" />
+                    <Chip size="small" label={eintrag.status || "Offen"} color={statusFarbe(eintrag.status)} />
+                    <Typography variant="body2" sx={{ minWidth: 180 }}>
+                      Erwartet: {eintrag.voraussichtlicherLiefertermin ? datumFormat(eintrag.voraussichtlicherLiefertermin) : "nicht bekannt"}
+                    </Typography>
+                  </Stack>
+                </AccordionSummary>
+                <AccordionDetails>
+                  <Grid container spacing={2}>
+                    <Grid size={{ xs: 12, md: 4 }}><Typography variant="caption" color="text.secondary">Gewünschter Liefertermin</Typography><Typography fontWeight={700}>{eintrag.gewuenschterLiefertermin ? datumFormat(eintrag.gewuenschterLiefertermin) : "—"}</Typography></Grid>
+                    <Grid size={{ xs: 12, md: 4 }}><Typography variant="caption" color="text.secondary">Voraussichtlicher Liefertermin</Typography><Typography fontWeight={700}>{eintrag.voraussichtlicherLiefertermin ? datumFormat(eintrag.voraussichtlicherLiefertermin) : "—"}</Typography></Grid>
+                    <Grid size={{ xs: 12, md: 4 }}><Typography variant="caption" color="text.secondary">Ansprechpartner</Typography><Typography fontWeight={700}>{eintrag.ansprechpartner || "—"}</Typography></Grid>
+                  </Grid>
+                  <Divider sx={{ my: 2 }} />
+                  <Stack spacing={1}>
+                    {(eintrag.fahrzeuge || []).map((fahrzeug, index) => (
+                      <Paper key={fahrzeug.id || index} variant="outlined" sx={{ p: 1.5 }}>
+                        <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" gap={1}>
+                          <Box><Typography fontWeight={800}>{fahrzeug.hersteller || "Hersteller offen"} {fahrzeug.modell || ""}</Typography><Typography variant="body2" color="text.secondary">{fahrzeug.ausstattung || "Keine Ausstattung hinterlegt"} · Anzahl: {fahrzeug.anzahl || 1}</Typography></Box>
+                          <Box textAlign={{ xs: "left", md: "right" }}><Typography variant="body2">Listenpreis: {euroFormat(fahrzeug.listenpreis)}</Typography><Typography fontWeight={800}>Angebot: {euroFormat(fahrzeug.angebotspreis)}</Typography></Box>
+                        </Stack>
+                      </Paper>
+                    ))}
+                  </Stack>
+                  {(eintrag.leasingrate || eintrag.kaufpreis || eintrag.sonderzahlung) ? <Paper variant="outlined" sx={{ p: 1.5, mt: 2 }}><Stack direction={{ xs: "column", sm: "row" }} spacing={3}><Typography>Leasingrate: <strong>{euroFormat(eintrag.leasingrate)}</strong></Typography><Typography>Kaufpreis: <strong>{euroFormat(eintrag.kaufpreis)}</strong></Typography><Typography>Sonderzahlung: <strong>{euroFormat(eintrag.sonderzahlung)}</strong></Typography></Stack></Paper> : null}
+                  {eintrag.notizen && <Typography sx={{ mt: 2, whiteSpace: "pre-wrap" }}>{eintrag.notizen}</Typography>}
+                  <Stack direction="row" justifyContent="flex-end" spacing={1} mt={2}>
+                    <Button startIcon={<EditIcon />} onClick={() => fahrzeugVorhabenBearbeiten(eintrag)}>Bearbeiten</Button>
+                    <Button color="error" startIcon={<DeleteIcon />} onClick={() => fahrzeugVorhabenLoeschen(eintrag)}>Löschen</Button>
+                  </Stack>
+                </AccordionDetails>
+              </Accordion>
+            ))}
+            {!gefilterteFahrzeugverhandlungen.length && <Alert severity="info">Noch keine Fahrzeugverhandlung vorhanden.</Alert>}
+          </Stack>
+        </>
+      ) : ansicht === "verhandlungen" ? (
         <>
           <Grid container spacing={2} mb={3}>
             {karten.map((karte) => (
@@ -2068,6 +2501,84 @@ export default function Verhandlungen() {
             {speichert ? "Speichert..." : "Speichern"}
           </Button>
         </DialogActions>
+      </Dialog>
+
+
+      <Dialog open={fahrzeugDialogOffen} onClose={() => setFahrzeugDialogOffen(false)} fullWidth maxWidth="lg">
+        <DialogTitle>{fahrzeugBearbeitungsId ? "Fahrzeugverhandlung bearbeiten" : "Neue Fahrzeugverhandlung"}</DialogTitle>
+        <DialogContent dividers>
+          <Grid container spacing={2}>
+            <Grid size={{ xs: 12, md: 6 }}>
+              <TextField select fullWidth label="Lieferant / Händler auswählen" name="lieferantId" value={fahrzeugFormular.lieferantId} onChange={fahrzeugFeldAendern}>
+                <MenuItem value="">Manuell eintragen</MenuItem>
+                {lieferanten.map((lieferant) => <MenuItem key={lieferant.id} value={lieferant.id}>{lieferant.firma}</MenuItem>)}
+              </TextField>
+            </Grid>
+            <Grid size={{ xs: 12, md: 6 }}><TextField fullWidth required label="Händler / Lieferant" name="firma" value={fahrzeugFormular.firma} onChange={fahrzeugFeldAendern} /></Grid>
+            <Grid size={{ xs: 12, md: 6 }}><TextField fullWidth label="Verhandlungsgegenstand" placeholder="z. B. Ersatzbeschaffung Werkstattfahrzeuge" name="beschreibung" value={fahrzeugFormular.beschreibung} onChange={fahrzeugFeldAendern} /></Grid>
+            <Grid size={{ xs: 6, md: 3 }}><TextField select fullWidth label="Beschaffungsart" name="beschaffungsart" value={fahrzeugFormular.beschaffungsart} onChange={fahrzeugFeldAendern}><MenuItem value="Leasing">Leasing</MenuItem><MenuItem value="Kauf">Kauf</MenuItem></TextField></Grid>
+            <Grid size={{ xs: 6, md: 3 }}><TextField select fullWidth label="Status" name="status" value={fahrzeugFormular.status} onChange={fahrzeugFeldAendern}>{["Offen", "In Verhandlung", "Bestellt", "Geliefert", "Abgebrochen"].map((wert) => <MenuItem key={wert} value={wert}>{wert}</MenuItem>)}</TextField></Grid>
+            <Grid size={{ xs: 12, md: 4 }}><TextField fullWidth type="date" label="Gewünschter Liefertermin" name="gewuenschterLiefertermin" value={fahrzeugFormular.gewuenschterLiefertermin} onChange={fahrzeugFeldAendern} slotProps={{ inputLabel: { shrink: true } }} /></Grid>
+            <Grid size={{ xs: 12, md: 4 }}><TextField fullWidth type="date" label="Voraussichtlicher Liefertermin" name="voraussichtlicherLiefertermin" value={fahrzeugFormular.voraussichtlicherLiefertermin} onChange={fahrzeugFeldAendern} slotProps={{ inputLabel: { shrink: true } }} /></Grid>
+            <Grid size={{ xs: 12, md: 4 }}><TextField fullWidth type="date" label="Wiedervorlage" name="wiedervorlage" value={fahrzeugFormular.wiedervorlage} onChange={fahrzeugFeldAendern} slotProps={{ inputLabel: { shrink: true } }} /></Grid>
+            <Grid size={{ xs: 12, md: 4 }}><TextField fullWidth label="Ansprechpartner" name="ansprechpartner" value={fahrzeugFormular.ansprechpartner} onChange={fahrzeugFeldAendern} /></Grid>
+            <Grid size={{ xs: 12, md: 4 }}><TextField fullWidth label="Telefon" name="telefon" value={fahrzeugFormular.telefon} onChange={fahrzeugFeldAendern} /></Grid>
+            <Grid size={{ xs: 12, md: 4 }}><TextField fullWidth label="E-Mail" name="email" value={fahrzeugFormular.email} onChange={fahrzeugFeldAendern} /></Grid>
+            <Grid size={{ xs: 12 }}><Divider><Chip icon={<DirectionsCarIcon />} label="Einzelne Fahrzeuge" /></Divider></Grid>
+            {fahrzeugFormular.fahrzeuge.map((fahrzeug, index) => (
+              <Grid size={{ xs: 12 }} key={fahrzeug.id}>
+                <Paper variant="outlined" sx={{ p: 2 }}>
+                  <Stack direction="row" justifyContent="space-between" alignItems="center" mb={2}><Typography fontWeight={800}>Fahrzeug {index + 1}</Typography><IconButton color="error" disabled={fahrzeugFormular.fahrzeuge.length === 1} onClick={() => fahrzeugZeileEntfernen(fahrzeug.id)}><RemoveCircleOutlineIcon /></IconButton></Stack>
+                  <Grid container spacing={2}>
+                    <Grid size={{ xs: 12, md: 3 }}><TextField fullWidth label="Hersteller" value={fahrzeug.hersteller} onChange={(event) => fahrzeugZeileAendern(fahrzeug.id, "hersteller", event.target.value)} /></Grid>
+                    <Grid size={{ xs: 12, md: 3 }}><TextField fullWidth label="Modell" value={fahrzeug.modell} onChange={(event) => fahrzeugZeileAendern(fahrzeug.id, "modell", event.target.value)} /></Grid>
+                    <Grid size={{ xs: 12, md: 4 }}><TextField fullWidth label="Ausstattung / Motorisierung" value={fahrzeug.ausstattung} onChange={(event) => fahrzeugZeileAendern(fahrzeug.id, "ausstattung", event.target.value)} /></Grid>
+                    <Grid size={{ xs: 12, md: 2 }}><TextField fullWidth type="number" label="Anzahl" value={fahrzeug.anzahl} onChange={(event) => fahrzeugZeileAendern(fahrzeug.id, "anzahl", event.target.value)} /></Grid>
+                    <Grid size={{ xs: 12, md: 4 }}><TextField fullWidth type="number" label="Listenpreis (€)" value={fahrzeug.listenpreis} onChange={(event) => fahrzeugZeileAendern(fahrzeug.id, "listenpreis", event.target.value)} /></Grid>
+                    <Grid size={{ xs: 12, md: 4 }}><TextField fullWidth type="number" label="Angebotspreis (€)" value={fahrzeug.angebotspreis} onChange={(event) => fahrzeugZeileAendern(fahrzeug.id, "angebotspreis", event.target.value)} /></Grid>
+                    <Grid size={{ xs: 12, md: 4 }}><TextField fullWidth label="Kennzeichen / Referenz" value={fahrzeug.kennzeichenOderReferenz} onChange={(event) => fahrzeugZeileAendern(fahrzeug.id, "kennzeichenOderReferenz", event.target.value)} /></Grid>
+                  </Grid>
+                </Paper>
+              </Grid>
+            ))}
+            <Grid size={{ xs: 12 }}><Button startIcon={<AddCircleOutlineIcon />} onClick={fahrzeugZeileHinzufuegen}>Weiteres Fahrzeug hinzufügen</Button></Grid>
+            <Grid size={{ xs: 12, md: 3 }}><TextField fullWidth type="number" label="Leasingrate monatlich (€)" name="leasingrate" value={fahrzeugFormular.leasingrate} onChange={fahrzeugFeldAendern} /></Grid>
+            <Grid size={{ xs: 12, md: 3 }}><TextField fullWidth type="number" label="Laufzeit (Monate)" name="laufzeitMonate" value={fahrzeugFormular.laufzeitMonate} onChange={fahrzeugFeldAendern} /></Grid>
+            <Grid size={{ xs: 12, md: 3 }}><TextField fullWidth type="number" label="Kaufpreis gesamt (€)" name="kaufpreis" value={fahrzeugFormular.kaufpreis} onChange={fahrzeugFeldAendern} /></Grid>
+            <Grid size={{ xs: 12, md: 3 }}><TextField fullWidth type="number" label="Sonderzahlung (€)" name="sonderzahlung" value={fahrzeugFormular.sonderzahlung} onChange={fahrzeugFeldAendern} /></Grid>
+            <Grid size={{ xs: 12 }}><TextField fullWidth multiline minRows={4} label="Notizen" name="notizen" value={fahrzeugFormular.notizen} onChange={fahrzeugFeldAendern} /></Grid>
+          </Grid>
+        </DialogContent>
+        <DialogActions><Button onClick={() => setFahrzeugDialogOffen(false)}>Abbrechen</Button><Button variant="contained" onClick={fahrzeugVorhabenSpeichern} disabled={speichert}>{speichert ? "Speichert..." : "Speichern"}</Button></DialogActions>
+      </Dialog>
+
+      <Dialog open={uebergabeDialogOffen} onClose={() => setUebergabeDialogOffen(false)} fullWidth maxWidth="md">
+        <DialogTitle>Urlaubsübergabe als PDF</DialogTitle>
+        <DialogContent dividers>
+          <Typography color="text.secondary" mb={2}>Wähle die offenen und zuletzt erledigten Verhandlungen aus. Im Druckdialog kannst du anschließend „Als PDF speichern“ auswählen.</Typography>
+          <Stack direction="row" spacing={1} mb={2}>
+            <Button size="small" onClick={() => setUebergabeAuswahl(uebergabeVerhandlungen.map((eintrag) => eintrag.id))}>Alle auswählen</Button>
+            <Button size="small" onClick={() => setUebergabeAuswahl([])}>Auswahl löschen</Button>
+          </Stack>
+          <Stack spacing={1}>
+            {uebergabeVerhandlungen.map((eintrag) => (
+              <Paper key={eintrag.id} variant="outlined" sx={{ p: 1.25 }}>
+                <Stack direction="row" spacing={1} alignItems="flex-start">
+                  <Checkbox checked={uebergabeAuswahl.includes(eintrag.id)} onChange={() => uebergabeUmschalten(eintrag.id)} />
+                  <Box sx={{ minWidth: 0, flexGrow: 1 }}>
+                    <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" gap={1}>
+                      <Box><Typography fontWeight={800}>{eintrag.firma}</Typography><Typography variant="body2">{eintrag.verhandlungsgegenstand || "Kein Verhandlungsgegenstand hinterlegt"}</Typography></Box>
+                      <Chip size="small" label={eintrag.status} color={statusFarbe(eintrag.status)} sx={{ alignSelf: "flex-start" }} />
+                    </Stack>
+                    <Typography variant="caption" color="text.secondary">Wiedervorlage: {eintrag.wiedervorlage ? datumFormat(eintrag.wiedervorlage) : "—"} · Ansprechpartner: {eintrag.ansprechpartner || "—"}</Typography>
+                  </Box>
+                </Stack>
+              </Paper>
+            ))}
+            {!uebergabeVerhandlungen.length && <Alert severity="info">Keine offenen oder zuletzt erledigten Verhandlungen vorhanden.</Alert>}
+          </Stack>
+        </DialogContent>
+        <DialogActions><Button onClick={() => setUebergabeDialogOffen(false)}>Abbrechen</Button><Button variant="contained" startIcon={<PictureAsPdfIcon />} onClick={uebergabeAlsPdfDrucken} disabled={!uebergabeAuswahl.length}>PDF-Druck öffnen</Button></DialogActions>
       </Dialog>
     </Box>
   );
