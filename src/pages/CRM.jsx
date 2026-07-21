@@ -40,6 +40,8 @@ import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import DeleteIcon from "@mui/icons-material/Delete";
 import EditIcon from "@mui/icons-material/Edit";
 import EventIcon from "@mui/icons-material/Event";
+import NotificationsActiveIcon from "@mui/icons-material/NotificationsActive";
+import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import ExpandLessIcon from "@mui/icons-material/ExpandLess";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import HistoryIcon from "@mui/icons-material/History";
@@ -114,7 +116,10 @@ const leerVertrag = {
   startdatum: "",
   enddatum: "",
   kuendigungsfrist: "",
+  kuendigungsfristMonate: "3",
   automatischeVerlaengerung: true,
+  erinnerungAktiv: true,
+  erinnerungTage: "90,60,30,14,7",
   kosten: "",
   kostenIntervall: "Monatlich",
   ansprechpartner: "",
@@ -434,7 +439,66 @@ function formatDatum(value) {
 }
 
 function heute() {
-  return new Date().toISOString().slice(0, 10);
+  const datum = new Date();
+  const offset = datum.getTimezoneOffset();
+  return new Date(datum.getTime() - offset * 60000).toISOString().slice(0, 10);
+}
+
+function isoAusDatum(datum) {
+  const offset = datum.getTimezoneOffset();
+  return new Date(datum.getTime() - offset * 60000).toISOString().slice(0, 10);
+}
+
+function kuendigungsfristMonate(vertrag) {
+  const direkt = Number(vertrag?.kuendigungsfristMonate);
+  if (Number.isFinite(direkt) && direkt >= 0) return direkt;
+  const text = String(vertrag?.kuendigungsfrist || vertrag?.kuendigungsfristText || "");
+  const monate = text.match(/(\d+(?:[.,]\d+)?)\s*monat/i);
+  if (monate) return Number(monate[1].replace(",", "."));
+  const wochen = text.match(/(\d+)\s*woche/i);
+  if (wochen) return Math.ceil(Number(wochen[1]) / 4.345);
+  const tage = text.match(/(\d+)\s*tag/i);
+  if (tage) return Math.ceil(Number(tage[1]) / 30);
+  return 0;
+}
+
+function kuendigungsStichtag(vertrag) {
+  if (!vertrag?.enddatum) return "";
+  const datum = new Date(`${vertrag.enddatum}T12:00:00`);
+  if (Number.isNaN(datum.getTime())) return "";
+  datum.setMonth(datum.getMonth() - kuendigungsfristMonate(vertrag));
+  return isoAusDatum(datum);
+}
+
+function tageBis(isoDatum) {
+  if (!isoDatum) return null;
+  const ziel = new Date(`${isoDatum}T12:00:00`);
+  const start = new Date(`${heute()}T12:00:00`);
+  if (Number.isNaN(ziel.getTime())) return null;
+  return Math.ceil((ziel.getTime() - start.getTime()) / 86400000);
+}
+
+function erinnerungsTage(vertrag) {
+  const roh = Array.isArray(vertrag?.erinnerungTage)
+    ? vertrag.erinnerungTage
+    : String(vertrag?.erinnerungTage || "90,60,30,14,7").split(/[,;\s]+/);
+  const tage = roh.map(Number).filter((wert) => Number.isFinite(wert) && wert >= 0);
+  return [...new Set(tage.length ? tage : [90, 60, 30, 14, 7])].sort((a, b) => b - a);
+}
+
+function vertragsFristInfo(vertrag) {
+  const stichtag = kuendigungsStichtag(vertrag);
+  const tage = tageBis(stichtag);
+  if (tage === null) return null;
+  const maxTage = Math.max(...erinnerungsTage(vertrag));
+  return { stichtag, tage, relevant: tage <= maxTage };
+}
+
+function fristText(info) {
+  if (!info) return "Keine Frist";
+  if (info.tage < 0) return `Kündigungsfrist seit ${Math.abs(info.tage)} Tag${Math.abs(info.tage) === 1 ? "" : "en"} abgelaufen`;
+  if (info.tage === 0) return "Kündigungsfrist heute";
+  return `Kündigungsfrist in ${info.tage} Tagen`;
 }
 
 function sortByName(a, b) {
@@ -587,6 +651,53 @@ export default function CRM({ onOpenNegotiation }) {
   const lieferantenHistorie = historie
     .filter((x) => x.lieferantId === auswahl?.id)
     .sort((a, b) => (b.erstelltAm?.seconds || 0) - (a.erstelltAm?.seconds || 0));
+
+  const vertragsErinnerungen = useMemo(() => vertraege
+    .filter((vertrag) => (vertrag.status || "Aktiv") === "Aktiv" && vertrag.erinnerungAktiv !== false)
+    .map((vertrag) => {
+      const info = vertragsFristInfo(vertrag);
+      const lieferant = lieferanten.find((eintrag) => eintrag.id === vertrag.lieferantId);
+      return { ...vertrag, fristInfo: info, lieferant };
+    })
+    .filter((vertrag) => vertrag.fristInfo?.relevant)
+    .sort((a, b) => a.fristInfo.tage - b.fristInfo.tage), [vertraege, lieferanten]);
+
+  const lieferantenErinnerungen = vertragsErinnerungen.filter((vertrag) => vertrag.lieferantId === auswahl?.id);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !("Notification" in window)) return;
+    if (Notification.permission !== "granted" || !vertragsErinnerungen.length) return;
+    const schluessel = `business-suite-vertragsfristen-${heute()}`;
+    if (localStorage.getItem(schluessel)) return;
+    const kritisch = vertragsErinnerungen.filter((vertrag) => vertrag.fristInfo.tage <= 30);
+    const auswahlListe = kritisch.length ? kritisch : vertragsErinnerungen;
+    const erster = auswahlListe[0];
+    new Notification("Business Suite: Vertragsfristen", {
+      body: auswahlListe.length === 1
+        ? `${erster.name}: ${fristText(erster.fristInfo)}`
+        : `${auswahlListe.length} Vertragsfristen benötigen Aufmerksamkeit.`,
+      icon: `${import.meta.env.BASE_URL}icons/pwa-192x192.png`,
+    });
+    localStorage.setItem(schluessel, "1");
+  }, [vertragsErinnerungen]);
+
+  async function browserErinnerungenAktivieren() {
+    if (!("Notification" in window)) {
+      setFehler("Dieser Browser unterstützt keine Benachrichtigungen.");
+      return;
+    }
+    const erlaubnis = await Notification.requestPermission();
+    if (erlaubnis === "granted") setMeldung("Browser-Erinnerungen für Vertragsfristen sind aktiviert.");
+    else setFehler("Benachrichtigungen wurden nicht erlaubt. Die Erinnerungen bleiben in der App sichtbar.");
+  }
+
+  function erinnerungOeffnen(erinnerung) {
+    const lieferant = erinnerung.lieferant || lieferanten.find((eintrag) => eintrag.id === erinnerung.lieferantId);
+    if (!lieferant) return;
+    setAuswahl(lieferant);
+    setDetailTab(2);
+    setOffeneVertraege((vorher) => ({ ...vorher, [erinnerung.id]: true }));
+  }
 
   async function historieSchreiben(lieferant, text) {
     if (!user || !lieferant) return;
@@ -782,6 +893,9 @@ delete vertragsFormularDaten._sourceCollection;
         kuendigungsfristText:
           vertragForm.kuendigungsfristText ||
           vertragForm.kuendigungsfrist || "",
+        kuendigungsfristMonate: String(vertragForm.kuendigungsfristMonate || "0"),
+        erinnerungAktiv: vertragForm.erinnerungAktiv !== false,
+        erinnerungTage: String(vertragForm.erinnerungTage || "90,60,30,14,7"),
         kosten: String(vertragForm.kosten || ""),
         userId: user.uid,
         lieferantId: auswahl.id,
@@ -1057,7 +1171,13 @@ delete vertragsFormularDaten._sourceCollection;
         </Paper>
 
         {detailTab === 0 && (
-          <Grid container spacing={2}>
+          <Stack spacing={2}>
+            {lieferantenErinnerungen.length > 0 && (
+              <Alert severity={lieferantenErinnerungen.some((vertrag) => vertrag.fristInfo.tage <= 0) ? "error" : "warning"}>
+                {lieferantenErinnerungen.length} Vertragsfrist{lieferantenErinnerungen.length === 1 ? "" : "en"} bei diesem Lieferanten beachten. Öffne den Tab „Verträge“ für Details.
+              </Alert>
+            )}
+            <Grid container spacing={2}>
             <Grid size={{ xs: 12, md: 7 }}>
               <Card>
                 <CardContent>
@@ -1082,7 +1202,8 @@ delete vertragsFormularDaten._sourceCollection;
                 <InfoCard label="Verträge" value={lieferantenVertraege.length} icon={<DescriptionIcon color="info" fontSize="large" />} />
               </Stack>
             </Grid>
-          </Grid>
+            </Grid>
+          </Stack>
         )}
 
         {detailTab === 1 && (
@@ -1223,10 +1344,14 @@ delete vertragsFormularDaten._sourceCollection;
             <Stack spacing={1.5}>
               {lieferantenVertraege.map((vertrag) => {
                 const istOffen = Boolean(offeneVertraege[vertrag.id]);
+                const fristInfo = vertragsFristInfo(vertrag);
                 return <Paper key={vertrag.id} variant="outlined">
                   <Stack direction="row" alignItems="center" spacing={1} sx={{ p: 1.5, cursor: "pointer" }} onClick={() => vertragAufklappen(vertrag.id)}>
                     <IconButton size="small">{istOffen ? <ExpandLessIcon /> : <ExpandMoreIcon />}</IconButton>
                     <Box sx={{ flexGrow: 1, minWidth: 0 }}><Typography fontWeight={800}>{vertrag.name}</Typography><Typography variant="body2" color="text.secondary">{vertrag.vertragsnummer ? `Nr. ${vertrag.vertragsnummer} · ` : ""}{vertrag.enddatum ? `Ende ${formatDatum(vertrag.enddatum)}` : "Unbefristet"}</Typography></Box>
+                    {fristInfo?.relevant && vertrag.erinnerungAktiv !== false && (
+                      <Chip size="small" icon={<WarningAmberIcon />} label={fristText(fristInfo)} color={fristInfo.tage <= 0 ? "error" : fristInfo.tage <= 30 ? "warning" : "default"} />
+                    )}
                     <Chip size="small" label={vertrag.status || "Aktiv"} color={vertrag.status === "Aktiv" ? "success" : "default"} />
                     <Box onClick={(event) => event.stopPropagation()}><IconButton onClick={() => vertragBearbeiten(vertrag)}><EditIcon /></IconButton><IconButton color="error" onClick={() => vertragLoeschen(vertrag)}><DeleteIcon /></IconButton></Box>
                   </Stack>
@@ -1242,6 +1367,8 @@ delete vertragsFormularDaten._sourceCollection;
                             : "—")}</Typography></Grid>
                       <Grid size={{ xs: 12, sm: 6 }}><Typography color="text.secondary">Kosten</Typography><Typography>{vertrag.kosten || "—"} {vertrag.kostenIntervall || ""}</Typography></Grid>
                       <Grid size={{ xs: 12, sm: 6 }}><Typography color="text.secondary">Automatische Verlängerung</Typography><Typography>{vertrag.automatischeVerlaengerung ? "Ja" : "Nein"}</Typography></Grid>
+                      <Grid size={{ xs: 12, sm: 6 }}><Typography color="text.secondary">Kündigungsstichtag</Typography><Typography color={fristInfo?.tage <= 0 ? "error.main" : "text.primary"}>{fristInfo ? `${formatDatum(fristInfo.stichtag)} · ${fristText(fristInfo)}` : "—"}</Typography></Grid>
+                      <Grid size={{ xs: 12, sm: 6 }}><Typography color="text.secondary">Erinnerungen</Typography><Typography>{vertrag.erinnerungAktiv === false ? "Aus" : `An · ${erinnerungsTage(vertrag).join(", ")} Tage vorher`}</Typography></Grid>
                       <Grid size={{ xs: 12, sm: 6 }}><Typography color="text.secondary">Ansprechpartner</Typography><Typography>{vertrag.ansprechpartner || "—"}</Typography></Grid>
                       {vertrag.notizen && <Grid size={{ xs: 12 }}><Typography color="text.secondary">Notizen</Typography><Typography sx={{ whiteSpace: "pre-wrap" }}>{vertrag.notizen}</Typography></Grid>}
                     </Grid>
@@ -1287,7 +1414,7 @@ delete vertragsFormularDaten._sourceCollection;
       <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" spacing={2} mb={3}>
         <Box><Typography variant={mobil ? "h5" : "h4"} fontWeight={900}>Dienstleister & Lieferanten</Typography><Typography color="text.secondary">Dienstleister, Lieferanten, Ansprechpartner, Verträge, Aufgaben und Verhandlungen kompakt in einer Akte verwalten.</Typography></Box>
         <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
-          <Button variant="outlined" startIcon={<AutoFixHighIcon />} onClick={importOeffnen}>Dokument einlesen</Button>
+          <Button variant="outlined" startIcon={<ImageSearchIcon />} onClick={importOeffnen}>Dokument lokal auslesen</Button>
           <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
             <Button variant="outlined" startIcon={<PictureAsPdfIcon />} onClick={lieferantenPdfOeffnen}>Lieferanten-PDF</Button>
             <Button variant="contained" startIcon={<AddIcon />} onClick={lieferantNeu}>Neuer Lieferant</Button>
@@ -1301,6 +1428,42 @@ delete vertragsFormularDaten._sourceCollection;
         <Grid size={{ xs: 12, sm: 6, md: 3 }}><InfoCard label="Offene Aufgaben" value={offeneAufgaben.length} icon={<TaskAltIcon color="warning" fontSize="large" />} /></Grid>
         <Grid size={{ xs: 12, sm: 6, md: 3 }}><InfoCard label="Fällig/überfällig" value={faelligeAufgaben.length} icon={<EventIcon color="error" fontSize="large" />} /></Grid>
       </Grid>
+
+      <Paper variant="outlined" sx={{ p: 2, mb: 3, borderColor: vertragsErinnerungen.length ? "warning.main" : "divider" }}>
+        <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" spacing={2}>
+          <Box>
+            <Stack direction="row" spacing={1} alignItems="center">
+              <NotificationsActiveIcon color={vertragsErinnerungen.length ? "warning" : "action"} />
+              <Typography variant="h6" fontWeight={850}>Vertragsfristen & Erinnerungen</Typography>
+            </Stack>
+            <Typography variant="body2" color="text.secondary" mt={0.5}>
+              {vertragsErinnerungen.length
+                ? `${vertragsErinnerungen.length} aktive Frist${vertragsErinnerungen.length === 1 ? "" : "en"} benötigt Aufmerksamkeit.`
+                : "Aktuell liegt keine überwachte Kündigungsfrist im Erinnerungszeitraum."}
+            </Typography>
+          </Box>
+          <Button variant="outlined" startIcon={<NotificationsActiveIcon />} onClick={browserErinnerungenAktivieren}>Browser-Erinnerungen aktivieren</Button>
+        </Stack>
+        {vertragsErinnerungen.length > 0 && (
+          <Stack spacing={1} mt={2}>
+            {vertragsErinnerungen.slice(0, 8).map((erinnerung) => (
+              <Paper key={`${erinnerung._sourceCollection || "vertrag"}-${erinnerung.id}`} variant="outlined" sx={{ p: 1.25, cursor: "pointer" }} onClick={() => erinnerungOeffnen(erinnerung)}>
+                <Stack direction={{ xs: "column", sm: "row" }} spacing={1} justifyContent="space-between" alignItems={{ sm: "center" }}>
+                  <Box>
+                    <Typography fontWeight={800}>{erinnerung.name}</Typography>
+                    <Typography variant="body2" color="text.secondary">{erinnerung.lieferant?.firma || erinnerung.anbieter || "Ohne Lieferant"} · Stichtag {formatDatum(erinnerung.fristInfo.stichtag)}</Typography>
+                  </Box>
+                  <Chip
+                    icon={<WarningAmberIcon />}
+                    label={fristText(erinnerung.fristInfo)}
+                    color={erinnerung.fristInfo.tage <= 0 ? "error" : erinnerung.fristInfo.tage <= 30 ? "warning" : "default"}
+                  />
+                </Stack>
+              </Paper>
+            ))}
+          </Stack>
+        )}
+      </Paper>
 
       <Paper sx={{ p: 2, mb: 3 }}>
         <Grid container spacing={2}>
@@ -1573,7 +1736,69 @@ function VertragDialog({ open, onClose, form, setForm, onSave, editing, saving }
     const { name, value, checked, type } = event.target;
     setForm((vorher) => ({ ...vorher, [name]: type === "checkbox" ? checked : value }));
   };
-  return <Dialog open={open} onClose={onClose} fullWidth maxWidth="md"><DialogTitle>{editing ? "Vertrag bearbeiten" : "Vertrag hinzufügen"}</DialogTitle><DialogContent><Grid container spacing={2} mt={0.5}><Grid size={{ xs: 12, md: 8 }}><TextField fullWidth required name="name" label="Vertragsbezeichnung" value={form.name} onChange={change} /></Grid><Grid size={{ xs: 12, md: 4 }}><TextField fullWidth name="vertragsnummer" label="Vertragsnummer" value={form.vertragsnummer} onChange={change} /></Grid><Grid size={{ xs: 12, md: 6 }}><TextField fullWidth name="kategorie" label="Vertragsart" value={form.kategorie} onChange={change} /></Grid><Grid size={{ xs: 12, md: 6 }}><TextField fullWidth select name="status" label="Status" value={form.status} onChange={change}>{["Aktiv", "Gekündigt", "Abgelaufen", "Entwurf"].map((wert) => <MenuItem key={wert} value={wert}>{wert}</MenuItem>)}</TextField></Grid><Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth type="date" name="startdatum" label="Vertragsbeginn" value={form.startdatum} onChange={change} slotProps={{ inputLabel: { shrink: true } }} /></Grid><Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth type="date" name="enddatum" label="Vertragsende" value={form.enddatum} onChange={change} slotProps={{ inputLabel: { shrink: true } }} /></Grid><Grid size={{ xs: 12, md: 6 }}><TextField fullWidth name="kuendigungsfrist" label="Kündigungsfrist" placeholder="z. B. 3 Monate zum Laufzeitende" value={form.kuendigungsfrist} onChange={change} /></Grid><Grid size={{ xs: 12, md: 6 }}><FormControlLabel control={<Switch name="automatischeVerlaengerung" checked={Boolean(form.automatischeVerlaengerung)} onChange={change} />} label="Automatische Verlängerung" /></Grid><Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth name="kosten" label="Kosten" placeholder="z. B. 1250,00 €" value={form.kosten} onChange={change} /></Grid><Grid size={{ xs: 12, sm: 6 }}><TextField fullWidth select name="kostenIntervall" label="Kostenintervall" value={form.kostenIntervall} onChange={change}>{["Monatlich", "Quartalsweise", "Jährlich", "Einmalig"].map((wert) => <MenuItem key={wert} value={wert}>{wert}</MenuItem>)}</TextField></Grid><Grid size={{ xs: 12 }}><TextField fullWidth name="ansprechpartner" label="Ansprechpartner" value={form.ansprechpartner} onChange={change} /></Grid><Grid size={{ xs: 12 }}><TextField fullWidth multiline minRows={3} name="notizen" label="Notizen" value={form.notizen} onChange={change} /></Grid></Grid></DialogContent><DialogActions><Button onClick={onClose}>Abbrechen</Button><Button variant="contained" onClick={onSave} disabled={saving || !form.name.trim()}>{saving ? "Speichert…" : "Speichern"}</Button></DialogActions></Dialog>;
+
+  return (
+    <Dialog open={open} onClose={onClose} fullWidth maxWidth="md">
+      <DialogTitle>{editing ? "Vertrag bearbeiten" : "Vertrag hinzufügen"}</DialogTitle>
+      <DialogContent>
+        <Grid container spacing={2} mt={0.5}>
+          <Grid size={{ xs: 12, md: 8 }}>
+            <TextField fullWidth required name="name" label="Vertragsbezeichnung" value={form.name} onChange={change} />
+          </Grid>
+          <Grid size={{ xs: 12, md: 4 }}>
+            <TextField fullWidth name="vertragsnummer" label="Vertragsnummer" value={form.vertragsnummer} onChange={change} />
+          </Grid>
+          <Grid size={{ xs: 12, md: 6 }}>
+            <TextField fullWidth name="kategorie" label="Vertragsart" value={form.kategorie} onChange={change} />
+          </Grid>
+          <Grid size={{ xs: 12, md: 6 }}>
+            <TextField fullWidth select name="status" label="Status" value={form.status} onChange={change}>
+              {["Aktiv", "Gekündigt", "Abgelaufen", "Entwurf"].map((wert) => <MenuItem key={wert} value={wert}>{wert}</MenuItem>)}
+            </TextField>
+          </Grid>
+          <Grid size={{ xs: 12, sm: 6 }}>
+            <TextField fullWidth type="date" name="startdatum" label="Vertragsbeginn" value={form.startdatum} onChange={change} slotProps={{ inputLabel: { shrink: true } }} />
+          </Grid>
+          <Grid size={{ xs: 12, sm: 6 }}>
+            <TextField fullWidth type="date" name="enddatum" label="Vertragsende" value={form.enddatum} onChange={change} slotProps={{ inputLabel: { shrink: true } }} />
+          </Grid>
+          <Grid size={{ xs: 12, md: 6 }}>
+            <TextField fullWidth name="kuendigungsfrist" label="Kündigungsfrist laut Vertrag" placeholder="z. B. 3 Monate zum Laufzeitende" value={form.kuendigungsfrist} onChange={change} />
+          </Grid>
+          <Grid size={{ xs: 12, md: 6 }}>
+            <TextField fullWidth type="number" name="kuendigungsfristMonate" label="Kündigungsfrist in Monaten" value={form.kuendigungsfristMonate} onChange={change} inputProps={{ min: 0, step: 1 }} helperText="Für die automatische Berechnung des Kündigungsstichtags" />
+          </Grid>
+          <Grid size={{ xs: 12, md: 6 }}>
+            <FormControlLabel control={<Switch name="automatischeVerlaengerung" checked={Boolean(form.automatischeVerlaengerung)} onChange={change} />} label="Automatische Verlängerung" />
+          </Grid>
+          <Grid size={{ xs: 12, md: 6 }}>
+            <FormControlLabel control={<Switch name="erinnerungAktiv" checked={form.erinnerungAktiv !== false} onChange={change} />} label="Vertragsfrist überwachen" />
+          </Grid>
+          <Grid size={{ xs: 12 }}>
+            <TextField fullWidth name="erinnerungTage" label="Erinnerungen in Tagen vorher" value={form.erinnerungTage || "90,60,30,14,7"} onChange={change} helperText="Zum Beispiel: 90, 60, 30, 14, 7" disabled={form.erinnerungAktiv === false} />
+          </Grid>
+          <Grid size={{ xs: 12, sm: 6 }}>
+            <TextField fullWidth name="kosten" label="Kosten" placeholder="z. B. 1250,00 €" value={form.kosten} onChange={change} />
+          </Grid>
+          <Grid size={{ xs: 12, sm: 6 }}>
+            <TextField fullWidth select name="kostenIntervall" label="Kostenintervall" value={form.kostenIntervall} onChange={change}>
+              {["Monatlich", "Quartalsweise", "Jährlich", "Einmalig"].map((wert) => <MenuItem key={wert} value={wert}>{wert}</MenuItem>)}
+            </TextField>
+          </Grid>
+          <Grid size={{ xs: 12 }}>
+            <TextField fullWidth name="ansprechpartner" label="Ansprechpartner" value={form.ansprechpartner} onChange={change} />
+          </Grid>
+          <Grid size={{ xs: 12 }}>
+            <TextField fullWidth multiline minRows={3} name="notizen" label="Notizen" value={form.notizen} onChange={change} />
+          </Grid>
+        </Grid>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose}>Abbrechen</Button>
+        <Button variant="contained" onClick={onSave} disabled={saving || !form.name.trim()}>{saving ? "Speichert…" : "Speichern"}</Button>
+      </DialogActions>
+    </Dialog>
+  );
 }
 
 function KontaktDialog({ open, onClose, form, setForm, onSave, editing, saving }) {

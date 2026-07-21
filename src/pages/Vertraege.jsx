@@ -908,7 +908,7 @@ export default function Vertraege() {
       <Paper sx={{ p: { xs: 2.5, sm: 3 } }}>
         <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" gap={2}>
           <Box>
-            <Typography variant="overline" color="primary" fontWeight={800}>Business Suite 4.2</Typography>
+            <Typography variant="overline" color="primary" fontWeight={800}>Business Suite 5.1</Typography>
             <Typography variant="h4" fontWeight={800}>Vertragsverwaltung</Typography>
             <Typography color="text.secondary" mt={0.5}>
               Lieferanten anlegen und darunter mehrere Verträge wie Rahmenverträge oder Nachträge verwalten. PDFs werden nur lokal ausgelesen und nicht gespeichert.

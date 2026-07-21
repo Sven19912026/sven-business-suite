@@ -1,10 +1,13 @@
-# Firebase-Dokumentablage – einmalige Einrichtung
+# Firebase-Dokumentablage – Einrichtung und Status
 
-Business Suite 5.0 speichert Dateien unter `business-suite/{userId}/{ownerType}/{ownerId}/...` in Firebase Storage. Die Metadaten liegen als Unterkollektion `dokumente` direkt unter dem jeweiligen Lieferanten oder der jeweiligen Verhandlung.
+Business Suite 5.1 verwendet weiterhin dieselbe Firebase-Struktur wie Version 5.0:
 
-## 1. Storage-Regel ergänzen
+- Dateien: `business-suite/{userId}/{ownerType}/{ownerId}/...` in Firebase Storage
+- Metadaten: Unterkollektion `dokumente` beim jeweiligen Lieferanten oder bei der jeweiligen Verhandlung
 
-Diesen Block innerhalb von `service firebase.storage { match /b/{bucket}/o { ... } }` ergänzen:
+Die zusätzlichen Felder für Titel, Beschreibung, Tags und Volltextindex liegen im bestehenden Dokument-Metadatensatz. Dafür sind keine neuen Regeln erforderlich.
+
+## Storage-Regel
 
 ```text
 match /business-suite/{userId}/{ownerType}/{ownerId}/{fileName} {
@@ -16,12 +19,17 @@ match /business-suite/{userId}/{ownerType}/{ownerId}/{fileName} {
 }
 ```
 
-## 2. Firestore-Regel ergänzen
-
-Jeweils innerhalb der vorhandenen Regeln für `lieferanten/{lieferantId}` und `verhandlungen/{verhandlungId}` ergänzen:
+## Firestore-Regel
 
 ```text
-match /dokumente/{dokumentId} {
+match /lieferanten/{lieferantId}/dokumente/{dokumentId} {
+  allow create: if request.auth != null
+    && request.resource.data.userId == request.auth.uid;
+  allow read, update, delete: if request.auth != null
+    && resource.data.userId == request.auth.uid;
+}
+
+match /verhandlungen/{verhandlungId}/dokumente/{dokumentId} {
   allow create: if request.auth != null
     && request.resource.data.userId == request.auth.uid;
   allow read, update, delete: if request.auth != null
@@ -29,24 +37,12 @@ match /dokumente/{dokumentId} {
 }
 ```
 
-## 3. Automatische Löschung aktivieren
+## Automatische 30-Tage-Löschung
 
-Die mitgelieferte Cloud Function prüft stündlich alle Dokumente mit abgelaufener `deleteAfter`-Frist und löscht sowohl die Storage-Datei als auch den Firestore-Metadatensatz.
+Die bereits bereitgestellte Function bleibt unverändert:
 
 ```bash
-npm install -g firebase-tools
-firebase login
-cd functions
-npm install
-cd ..
 firebase deploy --only functions:cleanupExpiredNegotiationDocuments
 ```
 
-Für geplante Cloud Functions muss das Firebase-Projekt den Blaze-Tarif verwenden. Unabhängig davon entfernt die App abgelaufene Dateien zusätzlich beim Öffnen der Verhandlungsverwaltung als Sicherheitsnetz.
-
-## Aufbewahrungslogik
-
-- Laufende Verhandlung: keine automatische Löschfrist.
-- Status `Abgeschlossen`, `Gewonnen` oder `Verloren`: vorhandene und neu hochgeladene Dateien erhalten eine Löschfrist von 30 Tagen.
-- Wird die Verhandlung wieder geöffnet, wird die Löschfrist der Dokumente entfernt.
-- Bereits vor Version 5.0 abgeschlossene Verhandlungen erhalten beim ersten Öffnen der Verhandlungsverwaltung eine neue 30-Tage-Frist, da kein historisches Abschlussdatum vorhanden war.
+Eine erneute Bereitstellung ist für das Update auf 5.1 nicht notwendig, wenn das Deployment von Version 5.0 erfolgreich abgeschlossen wurde.

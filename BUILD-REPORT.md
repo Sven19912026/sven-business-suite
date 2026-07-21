@@ -1,22 +1,50 @@
-# Sven Business Suite 5.0 – Phase 1
+# Sven Business Suite 5.1 – Build-Report
 
 ## Umgesetzt
 
-- Firebase-Storage-Dokumentablage direkt in jeder Lieferanten-/Dienstleisterakte.
-- Dokumentarten: Verträge, Bonusvereinbarungen, Preislisten, Angebote und Sonstiges.
-- Dokumentablage direkt im Bearbeitungsdialog jeder bestehenden Verhandlung.
-- Upload bis 30 MB mit Fortschrittsanzeige, Dateigröße, Kategorie, Öffnen und vollständigem Löschen aus Storage und Firestore.
-- Rückwärtskompatible Unterkollektionen; bestehende Datenmodelle und Funktionen bleiben unverändert.
-- Verhandlungsstatus `Abgeschlossen`, `Gewonnen` oder `Verloren` startet eine 30-Tage-Aufbewahrungsfrist.
-- Wieder geöffnete Verhandlungen verlieren die automatische Löschfrist.
-- Stündliche Firebase Cloud Function löscht nach Fristablauf Datei und Firestore-Metadatensatz.
-- Zusätzliche clientseitige Bereinigung als Sicherheitsnetz.
-- Beim manuellen Löschen eines Lieferanten oder einer Verhandlung werden zugehörige Dateien ebenfalls entfernt.
+### Dokumentablage bei Lieferanten und Verhandlungen
 
-## Firebase-Einrichtung
+- Mehrfach-Upload und Drag & Drop am PC.
+- Mobile Aufnahme über die Gerätekamera mit dem Button „Mit Handy scannen“.
+- Kategorien, frei vergebbare Tags, Titel und Beschreibung.
+- Volltextsuche über Dateiname, Titel, Beschreibung, Kategorie, Tags und erkannten Dokumenttext.
+- Lokale Texterkennung für digitale PDFs, gescannte PDFs, Bilder und Textdateien.
+- Bestehende Dokumente können über das Lupen-Symbol nachträglich indexiert werden.
+- PDF- und Bildvorschau direkt innerhalb der Business Suite.
+- Öffnen in einem neuen Browserfenster bleibt zusätzlich möglich.
+- Mehrere Dateien werden nacheinander hochgeladen und einzeln abgesichert.
+- Maximale Dateigröße weiterhin 30 MB pro Datei.
+- Die bestehende 30-Tage-Löschung für abgeschlossene oder verlorene Verhandlungen bleibt unverändert aktiv.
 
-Siehe `FIREBASE-DOKUMENTABLAGE.md`. Die Storage-/Firestore-Regeln müssen in die vorhandenen Regeln eingefügt und die Cloud Function einmalig bereitgestellt werden.
+### Vertragsüberwachung
+
+- Berechnung des Kündigungsstichtags aus Vertragsende und Kündigungsfrist in Monaten.
+- Frei wählbare Erinnerungsabstände, standardmäßig 90, 60, 30, 14 und 7 Tage vorher.
+- Zentrale Übersicht über anstehende und abgelaufene Vertragsfristen.
+- Warnhinweise direkt in der Lieferantenakte und am jeweiligen Vertrag.
+- Optional aktivierbare Browser-Benachrichtigung beim Öffnen der App.
+- Bestehende Verträge bleiben kompatibel; vorhandene Freitext-Kündigungsfristen werden weiterhin angezeigt und soweit möglich ausgewertet.
+
+### Datenschutz und KI
+
+- Keine KI-Analyse und kein KI-API-Schlüssel eingebaut.
+- PDF-Textauslesung und OCR erfolgen lokal im Browser.
+- Dokumente werden ausschließlich wie bisher in Firebase Storage gespeichert.
+
+## Rückwärtskompatibilität
+
+- Bestehende Lieferanten, Verhandlungen, Verträge, Aufgaben und Dokumente werden nicht migriert oder überschrieben.
+- Neue Felder werden nur ergänzend gespeichert.
+- Vorhandene Dokumente funktionieren weiterhin; für die Suche im Dokumentinhalt kann der Volltextindex einmalig per Lupen-Symbol erstellt werden.
+- Die bereits eingerichteten Storage- und Firestore-Regeln aus Version 5.0 reichen weiterhin aus.
+- Die bereits bereitgestellte Cloud Function für die 30-Tage-Löschung bleibt unverändert kompatibel.
 
 ## Prüfung
 
-`npm run check` erfolgreich ausgeführt: ESLint ohne Fehler, Vite-Produktionsbuild erfolgreich, PWA-Service-Worker erzeugt. Der vollständige Lauf steht in `CHECK-RESULT.txt`.
+- `npm run lint`: erfolgreich, keine Fehler.
+- `npm run build`: erfolgreich.
+- PWA-Service-Worker und Web-App-Manifest wurden erzeugt.
+- `node --check functions/index.js`: erfolgreich.
+- Vite weist lediglich auf die Größe des Haupt-Bundles hin; dies ist eine Warnung und kein Build-Fehler.
+
+Der vollständige Prüflauf steht in `CHECK-RESULT.txt`.
