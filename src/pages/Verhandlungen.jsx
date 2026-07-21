@@ -187,6 +187,17 @@ function einsparung(eintrag) {
     0
   );
 }
+function statusNormalisieren(status) {
+  if (status === "Gewonnen") {
+    return "Abgeschlossen";
+  }
+
+  return status || "Offen";
+}
+
+function statusIstAbgeschlossen(status) {
+  return status === "Abgeschlossen" || status === "Gewonnen";
+}
 
 function prozentFormat(wert) {
   const zahl = Number(wert);
@@ -388,9 +399,9 @@ export default function Verhandlungen() {
         eintrag.status === "Offen" || eintrag.status === "In Verhandlung"
     ).length;
 
-    const gewonnen = verhandlungen.filter(
-      (eintrag) => eintrag.status === "Gewonnen"
-    ).length;
+    const abgeschlossen = verhandlungen.filter(
+  (eintrag) => statusIstAbgeschlossen(eintrag.status)
+).length;
 
     const gesamtEinsparung = verhandlungen.reduce(
       (summe, eintrag) => summe + einsparung(eintrag),
@@ -409,18 +420,18 @@ export default function Verhandlungen() {
       (eintrag) =>
         eintrag.wiedervorlage &&
         eintrag.wiedervorlage <= heuteText() &&
-        eintrag.status !== "Gewonnen" &&
-        eintrag.status !== "Verloren"
+        !statusIstAbgeschlossen(eintrag.status) &&
+eintrag.status !== "Verloren"
     ).length;
 
     return {
-      offen,
-      gewonnen,
-      gesamtEinsparung,
-      gesamtEinsparungProzent,
-      ausgangsVolumen,
-      faellig,
-    };
+  offen,
+  abgeschlossen,
+  gesamtEinsparung,
+  gesamtEinsparungProzent,
+  ausgangsVolumen,
+  faellig,
+};
   }, [verhandlungen]);
 
   const gefilterteVerhandlungen = useMemo(() => {
@@ -428,7 +439,8 @@ export default function Verhandlungen() {
 
     const gefiltert = verhandlungen.filter((eintrag) => {
       const passtStatus =
-        statusFilter === "Alle" || eintrag.status === statusFilter;
+  statusFilter === "Alle" ||
+  statusNormalisieren(eintrag.status) === statusFilter;
       const passtPrioritaet =
         prioritaetFilter === "Alle" ||
         eintrag.prioritaet === prioritaetFilter;
@@ -609,7 +621,7 @@ export default function Verhandlungen() {
       telefon: eintrag.telefon ?? "",
       email: eintrag.email ?? "",
       kategorie: eintrag.kategorie ?? "Material",
-      status: eintrag.status ?? "Offen",
+      status: statusNormalisieren(eintrag.status),
       prioritaet: eintrag.prioritaet ?? "Mittel",
       ausgangsangebot: eintrag.ausgangsangebot ?? "",
       aktuellesAngebot: eintrag.aktuellesAngebot ?? "",
@@ -676,8 +688,9 @@ export default function Verhandlungen() {
     setFehler("");
 
     const daten = {
-      ...verhandlungsFormular,
-      firma: verhandlungsFormular.firma.trim(),
+  ...verhandlungsFormular,
+  status: statusNormalisieren(verhandlungsFormular.status),
+  firma: verhandlungsFormular.firma.trim(),
       auftraggeberName: verhandlungsFormular.auftraggeberName.trim(),
       verhandlungsgegenstand:
         verhandlungsFormular.verhandlungsgegenstand.trim(),
@@ -1044,7 +1057,11 @@ export default function Verhandlungen() {
       .filter((eintrag) => eintrag.status === "Offen" || eintrag.status === "In Verhandlung")
       .sort((a, b) => String(a.wiedervorlage || "9999-12-31").localeCompare(String(b.wiedervorlage || "9999-12-31")));
     const erledigt = verhandlungen
-      .filter((eintrag) => eintrag.status === "Gewonnen" || eintrag.status === "Verloren")
+      .filter(
+  (eintrag) =>
+    statusIstAbgeschlossen(eintrag.status) ||
+    eintrag.status === "Verloren"
+)
       .sort((a, b) => (b.aktualisiertAm?.seconds || b.erstelltAm?.seconds || 0) - (a.aktualisiertAm?.seconds || a.erstelltAm?.seconds || 0))
       .slice(0, 10);
     return [...offen, ...erledigt];
@@ -1138,10 +1155,10 @@ export default function Verhandlungen() {
       icon: <HandshakeIcon fontSize="large" />,
     },
     {
-      titel: "Gewonnen",
-      wert: kennzahlen.gewonnen,
-      icon: <EmojiEventsIcon fontSize="large" />,
-    },
+  titel: "Abgeschlossen",
+  wert: kennzahlen.abgeschlossen,
+  icon: <EmojiEventsIcon fontSize="large" />,
+},
     {
       titel: "Gesamte Einsparung",
       wert: euroFormat(kennzahlen.gesamtEinsparung),
@@ -1400,7 +1417,9 @@ export default function Verhandlungen() {
                   <MenuItem value="Alle">Alle</MenuItem>
                   <MenuItem value="Offen">Offen</MenuItem>
                   <MenuItem value="In Verhandlung">In Verhandlung</MenuItem>
-                  <MenuItem value="Gewonnen">Gewonnen</MenuItem>
+                  <MenuItem value="Abgeschlossen">
+  Abgeschlossen
+</MenuItem>
                   <MenuItem value="Verloren">Verloren</MenuItem>
                 </TextField>
               </Grid>
@@ -1504,7 +1523,7 @@ export default function Verhandlungen() {
                       useFlexGap
                     >
                       <Chip
-                        label={eintrag.status}
+                        label={statusNormalisieren(eintrag.status)}
                         color={statusFarbe(eintrag.status)}
                         size="small"
                       />
@@ -1631,7 +1650,7 @@ export default function Verhandlungen() {
                       </TableCell>
                       <TableCell>
                         <Chip
-                          label={eintrag.status}
+                          label={statusNormalisieren(eintrag.status)}
                           color={statusFarbe(eintrag.status)}
                           size="small"
                         />
@@ -2152,7 +2171,9 @@ export default function Verhandlungen() {
               >
                 <MenuItem value="Offen">Offen</MenuItem>
                 <MenuItem value="In Verhandlung">In Verhandlung</MenuItem>
-                <MenuItem value="Gewonnen">Gewonnen</MenuItem>
+                <MenuItem value="Abgeschlossen">
+  Abgeschlossen
+</MenuItem>
                 <MenuItem value="Verloren">Verloren</MenuItem>
               </TextField>
             </Grid>
@@ -2687,7 +2708,7 @@ export default function Verhandlungen() {
                   <Box sx={{ minWidth: 0, flexGrow: 1 }}>
                     <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" gap={1}>
                       <Box><Typography fontWeight={800}>{eintrag.firma}</Typography><Typography variant="body2">{eintrag.verhandlungsgegenstand || "Kein Verhandlungsgegenstand hinterlegt"}</Typography></Box>
-                      <Chip size="small" label={eintrag.status} color={statusFarbe(eintrag.status)} sx={{ alignSelf: "flex-start" }} />
+                      <Chip size="small" label={statusNormalisieren(eintrag.status)} color={statusFarbe(eintrag.status)} sx={{ alignSelf: "flex-start" }} />
                     </Stack>
                     <Typography variant="caption" color="text.secondary">Wiedervorlage: {eintrag.wiedervorlage ? datumFormat(eintrag.wiedervorlage) : "—"} · Ansprechpartner: {eintrag.ansprechpartner || "—"}</Typography>
                   </Box>

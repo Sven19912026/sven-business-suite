@@ -31,6 +31,7 @@ import AccessTimeRoundedIcon from '@mui/icons-material/AccessTimeRounded'
 import ArrowForwardRoundedIcon from '@mui/icons-material/ArrowForwardRounded'
 import BoltRoundedIcon from '@mui/icons-material/BoltRounded'
 import BusinessRoundedIcon from '@mui/icons-material/BusinessRounded'
+import CompareArrowsRoundedIcon from '@mui/icons-material/CompareArrowsRounded'
 import CalendarMonthRoundedIcon from '@mui/icons-material/CalendarMonthRounded'
 import CheckCircleRoundedIcon from '@mui/icons-material/CheckCircleRounded'
 import CloseRoundedIcon from '@mui/icons-material/CloseRounded'
@@ -64,6 +65,7 @@ import Aufgaben from './pages/Aufgaben'
 import CRM from './pages/CRM'
 import Mitarbeiter from './pages/Mitarbeiter'
 import Verhandlungen from './pages/Verhandlungen'
+import VerhandlungenWettbewerb from './pages/VerhandlungenWettbewerb'
 import Vertraege from './pages/Vertraege'
 
 const drawerWidth = 288
@@ -204,21 +206,29 @@ const navigation = [
     icon: HandshakeRoundedIcon,
     description: 'Angebote und Ergebnisse',
   },
-{
-  title: 'Dienstleister und Lieferanten',
-  page: 'CRM',
-  icon: BusinessRoundedIcon,
-  description: 'Firmen, Kontakte und Verträge',
-},
+  {
+    title: 'Verhandlungen – Wettbewerb',
+    icon: CompareArrowsRoundedIcon,
+    description: 'Anbieter und Gesamtkosten',
+  },
+  {
+    title: 'Dienstleister und Lieferanten',
+    page: 'CRM',
+    icon: BusinessRoundedIcon,
+    description: 'Firmen, Kontakte und Verträge',
+  },
   {
     title: 'Mitarbeiter',
     icon: GroupsRoundedIcon,
-    description: 'Stammdaten und Termine',
+    description: 'Stammdaten und Lohnentwicklung',
   },
 ]
 
 const pageMeta = Object.fromEntries(
-  navigation.map((item) => [item.page || item.title, item]),
+  navigation.map((item) => [
+    item.page || item.title,
+    item,
+  ]),
 )
 
 const moduleCards = [
@@ -381,7 +391,7 @@ function Login() {
           </Box>
           <Box>
             <Typography variant="h6" lineHeight={1.15}>Sven Business Suite</Typography>
-            <Typography variant="caption" sx={{ opacity: 0.72, letterSpacing: '.08em' }}>VERSION 4.0</Typography>
+            <Typography variant="caption" sx={{ opacity: 0.72, letterSpacing: '.08em' }}>VERSION 4.9</Typography>
           </Box>
         </Stack>
 
@@ -419,7 +429,7 @@ function Login() {
           </Box>
           <Box>
             <Typography fontWeight={850} lineHeight={1.1}>Sven Business Suite</Typography>
-            <Typography variant="caption" color="text.secondary">Version 4.0</Typography>
+            <Typography variant="caption" color="text.secondary">Version 4.9</Typography>
           </Box>
         </Stack>
 
@@ -681,7 +691,7 @@ function Dashboard({ user, openPage }) {
         <Box sx={{ position: 'relative', display: 'grid', gridTemplateColumns: { xs: '1fr', lg: 'minmax(0, 1fr) 320px' }, gap: 4, alignItems: 'center' }}>
           <Box sx={{ maxWidth: 760 }}>
             <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1.5 }}>
-              <Chip size="small" label="BUSINESS SUITE 4.0" sx={{ color: '#dbe8ff', bgcolor: 'rgba(255,255,255,.12)', border: '1px solid rgba(255,255,255,.14)' }} />
+              <Chip size="small" label="BUSINESS SUITE 4.9" sx={{ color: '#dbe8ff', bgcolor: 'rgba(255,255,255,.12)', border: '1px solid rgba(255,255,255,.14)' }} />
               <Typography variant="caption" sx={{ opacity: 0.68 }}>{formatDate(today, { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })}</Typography>
             </Stack>
             <Typography variant="h3" sx={{ fontSize: { xs: '2rem', sm: '2.55rem', lg: '3rem' } }}>
@@ -887,12 +897,39 @@ function Dashboard({ user, openPage }) {
 }
 
 function PageContent({ page, user, setPage }) {
-  if (page === 'Dashboard') return <Dashboard user={user} openPage={setPage} />
-  if (page === 'Aufgaben') return <Aufgaben />
-  if (page === 'Verträge') return <Vertraege />
-  if (page === 'Verhandlungen') return <Verhandlungen />
-  if (page === 'CRM') return <CRM />
-  if (page === 'Mitarbeiter') return <Mitarbeiter />
+  if (page === 'Dashboard') {
+    return (
+      <Dashboard
+        user={user}
+        openPage={setPage}
+      />
+    )
+  }
+
+  if (page === 'Aufgaben') {
+    return <Aufgaben />
+  }
+
+  if (page === 'Verträge') {
+    return <Vertraege />
+  }
+
+  if (page === 'Verhandlungen') {
+    return <Verhandlungen />
+  }
+
+  if (page === 'Verhandlungen – Wettbewerb') {
+    return <VerhandlungenWettbewerb />
+  }
+
+  if (page === 'CRM') {
+    return <CRM />
+  }
+
+  if (page === 'Mitarbeiter') {
+    return <Mitarbeiter />
+  }
+
   return null
 }
 
@@ -911,7 +948,7 @@ function NavigationContent({ page, setPage, user, logout, closeMobile, mobile = 
           </Box>
           <Box sx={{ minWidth: 0 }}>
             <Typography fontWeight={880} lineHeight={1.1} noWrap>Sven Business</Typography>
-            <Typography variant="caption" color="text.secondary" sx={{ letterSpacing: '.08em' }}>SUITE 4.0</Typography>
+            <Typography variant="caption" color="text.secondary" sx={{ letterSpacing: '.08em' }}>SUITE 4.9</Typography>
           </Box>
         </Stack>
         {mobile && (
@@ -927,12 +964,15 @@ function NavigationContent({ page, setPage, user, logout, closeMobile, mobile = 
       <List sx={{ px: 1.35, py: 0.5 }}>
         {navigation.map((item) => {
           const Icon = item.icon
-          const selected = page === (item.page || item.title)
+          const selected =
+  page === (item.page || item.title)
           return (
             <ListItemButton
               key={item.title}
               selected={selected}
-              onClick={() => choose(item.page || item.title)}
+              onClick={() =>
+  choose(item.page || item.title)
+}
               sx={{
                 position: 'relative',
                 mb: 0.45,
@@ -1097,7 +1137,7 @@ function AuthenticatedArea({ user, colorMode, toggleColorMode }) {
   const [mobileOpen, setMobileOpen] = useState(false)
 
   useEffect(() => {
-    document.title = `${page} | Sven Business Suite 4.0`
+    document.title = `${page} | Sven Business Suite 4.9`
   }, [page])
 
   async function logout() {
