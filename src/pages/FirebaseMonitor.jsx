@@ -57,12 +57,12 @@ const COLLECTIONS = [
   },
   {
     name: "suiteVertraege",
-    label: "Verträge",
+    label: "VertrÃ¤ge",
     scoped: true,
   },
   {
     name: "vertraege",
-    label: "Verträge – bisheriger CRM-Bestand",
+    label: "VertrÃ¤ge â€“ bisheriger CRM-Bestand",
     scoped: true,
   },
   {
@@ -77,7 +77,7 @@ const COLLECTIONS = [
   },
   {
     name: "verhandlungsWettbewerbe",
-    label: "Verhandlungen – Wettbewerb",
+    label: "Verhandlungen â€“ Wettbewerb",
     scoped: true,
   },
   {
@@ -209,7 +209,7 @@ export default function FirebaseMonitor() {
             };
           } catch (collectionError) {
             console.warn(
-              `Sammlung ${item.name} konnte nicht gezählt werden.`,
+              `Sammlung ${item.name} konnte nicht gezÃ¤hlt werden.`,
               collectionError
             );
 
@@ -232,6 +232,8 @@ export default function FirebaseMonitor() {
   }
 
   useEffect(() => {
+    // Initiales Laden der Firestore-Zähler beim Öffnen der Seite
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadCounts();
   }, []);
 
@@ -259,7 +261,7 @@ export default function FirebaseMonitor() {
   function resetCounter() {
     if (
       !window.confirm(
-        "Den lokal erfassten Read-/Write-/Delete-Zähler zurücksetzen? Die eigentlichen Firestore-Daten werden nicht gelöscht."
+        "Den lokal erfassten Read-/Write-/Delete-ZÃ¤hler zurÃ¼cksetzen? Die eigentlichen Firestore-Daten werden nicht gelÃ¶scht."
       )
     ) {
       return;
@@ -290,8 +292,8 @@ export default function FirebaseMonitor() {
             </Typography>
 
             <Typography color="text.secondary" mt={0.8}>
-              Dokumentbestand und von der Business Suite ausgelöste
-              Firestore-Vorgänge.
+              Dokumentbestand und von der Business Suite ausgelÃ¶ste
+              Firestore-VorgÃ¤nge.
             </Typography>
           </Box>
 
@@ -301,7 +303,7 @@ export default function FirebaseMonitor() {
               startIcon={<DeleteSweepRoundedIcon />}
               onClick={resetCounter}
             >
-              Zähler zurücksetzen
+              ZÃ¤hler zurÃ¼cksetzen
             </Button>
 
             <Button
@@ -317,10 +319,10 @@ export default function FirebaseMonitor() {
       </Paper>
 
       <Alert severity="info">
-        Der Read-/Write-/Delete-Zähler ist ein App-Zähler. Er erfasst die
-        Vorgänge, die diese Business Suite in diesem Browser ausführt. Die
-        endgültige Abrechnung in Firebase kann zusätzlich Indexabfragen,
-        Sicherheitsregeln, erneute Verbindungen und Zugriffe anderer Geräte
+        Der Read-/Write-/Delete-ZÃ¤hler ist ein App-ZÃ¤hler. Er erfasst die
+        VorgÃ¤nge, die diese Business Suite in diesem Browser ausfÃ¼hrt. Die
+        endgÃ¼ltige Abrechnung in Firebase kann zusÃ¤tzlich Indexabfragen,
+        Sicherheitsregeln, erneute Verbindungen und Zugriffe anderer GerÃ¤te
         enthalten.
       </Alert>
 
@@ -384,7 +386,7 @@ export default function FirebaseMonitor() {
             </Typography>
 
             <Typography variant="body2" color="text.secondary" mt={0.4}>
-              Live-Zählung der vorhandenen Firestore-Dokumente.
+              Live-ZÃ¤hlung der vorhandenen Firestore-Dokumente.
             </Typography>
           </Box>
 
@@ -424,7 +426,7 @@ export default function FirebaseMonitor() {
                       <TableCell align="right">
                         {item.available
                           ? numberFormat(item.count)
-                          : "–"}
+                          : "â€“"}
                       </TableCell>
 
                       <TableCell align="right">
@@ -435,7 +437,7 @@ export default function FirebaseMonitor() {
                             item.available ? "filled" : "outlined"
                           }
                           label={
-                            item.available ? "Verfügbar" : "Nicht lesbar"
+                            item.available ? "VerfÃ¼gbar" : "Nicht lesbar"
                           }
                         />
                       </TableCell>
@@ -498,7 +500,7 @@ export default function FirebaseMonitor() {
 
             <Typography color="text.secondary" mt={1} lineHeight={1.7}>
               Die Datei- und Speicherplatzanzeige wird zusammen mit dem
-              Upload für Verträge, Preislisten und Angebote aktiviert.
+              Upload fÃ¼r VertrÃ¤ge, Preislisten und Angebote aktiviert.
             </Typography>
 
             <Chip
@@ -509,10 +511,10 @@ export default function FirebaseMonitor() {
           </Paper>
 
           <Typography variant="caption" color="text.secondary">
-            Letzte lokale Zähleraktualisierung:{" "}
+            Letzte lokale ZÃ¤hleraktualisierung:{" "}
             {usage.updatedAt
               ? new Date(usage.updatedAt).toLocaleString("de-DE")
-              : "Noch keine Vorgänge erfasst"}
+              : "Noch keine VorgÃ¤nge erfasst"}
           </Typography>
         </Stack>
       </Box>
