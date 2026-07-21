@@ -517,42 +517,6 @@ function useDashboardData(user) {
   return state
 }
 
-function MetricCard({ icon, label, value, helper, status, accent, soft }) {
-  return (
-    <Paper
-      elevation={0}
-      sx={{
-        p: 2.5,
-        minHeight: 146,
-        border: '1px solid #e4e9f1',
-        display: 'flex',
-        flexDirection: 'column',
-        justifyContent: 'space-between',
-        transition: 'transform .18s ease, box-shadow .18s ease',
-        '&:hover': { transform: 'translateY(-2px)', boxShadow: '0 14px 30px rgba(31, 45, 78, .08)' },
-      }}
-    >
-      <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
-        <Box sx={{ width: 44, height: 44, borderRadius: 3, display: 'grid', placeItems: 'center', color: accent, bgcolor: soft }}>
-          {icon}
-        </Box>
-        <Chip size="small" label="Live" sx={{ bgcolor: '#eefaf5', color: '#147a58', height: 26 }} />
-      </Stack>
-      <Box sx={{ mt: 2 }}>
-        {status === 'loading' ? (
-          <Skeleton width={58} height={42} />
-        ) : (
-          <Typography variant="h4" sx={{ lineHeight: 1 }}>{status === 'error' ? '–' : value}</Typography>
-        )}
-        <Typography fontWeight={780} sx={{ mt: 0.8 }}>{label}</Typography>
-        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25 }}>
-          {status === 'error' ? 'Derzeit nicht verfügbar' : helper}
-        </Typography>
-      </Box>
-    </Paper>
-  )
-}
-
 function DueStatus({ date }) {
   const today = todayIso()
   let label = formatDate(date, { day: '2-digit', month: '2-digit', year: 'numeric' })
@@ -769,45 +733,6 @@ function Dashboard({ user, openPage }) {
       </Paper>
 
       <WorkAreas data={data} counts={counts} openPage={openPage} />
-
-      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))', xl: 'repeat(4, minmax(0, 1fr))' }, gap: 2 }}>
-        <MetricCard
-          icon={<TaskAltRoundedIcon />}
-          label="Offene Aufgaben"
-          value={openTasks.length}
-          helper={`${overdueTasks.length} davon überfällig`}
-          status={data.tasks.status}
-          accent="#2457d6"
-          soft="#eaf0ff"
-        />
-        <MetricCard
-          icon={<DescriptionRoundedIcon />}
-          label="Aktive Verträge"
-          value={activeContracts.length}
-          helper="Laufende Vertragsverhältnisse"
-          status={data.contracts.status}
-          accent="#7c3aed"
-          soft="#f2ecff"
-        />
-        <MetricCard
-          icon={<HandshakeRoundedIcon />}
-          label="Laufende Verhandlungen"
-          value={activeNegotiations.length}
-          helper="Offen oder in Verhandlung"
-          status={data.negotiations.status}
-          accent="#c26b12"
-          soft="#fff4e6"
-        />
-        <MetricCard
-          icon={<BusinessRoundedIcon />}
-          label="Aktive Geschäftskontakte"
-          value={activeSuppliers.length}
-          helper="Im CRM verfügbar"
-          status={data.suppliers.status}
-          accent="#0f766e"
-          soft="#e8f7f4"
-        />
-      </Box>
 
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', xl: 'minmax(0, 1.45fr) minmax(340px, .55fr)' }, gap: 2.25 }}>
         <Paper elevation={0} sx={{ p: { xs: 2.5, md: 3 }, border: '1px solid #e4e9f1' }}>

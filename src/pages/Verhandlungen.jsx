@@ -71,6 +71,9 @@ import {
 import { auth, db } from "../firebase";
 
 const leerVerhandlungsFormular = {
+  auftraggeberId: "",
+  auftraggeberName: "",
+  verhandlungstag: "",
   lieferantId: "",
   firma: "",
   verhandlungsgegenstand: "",
@@ -85,6 +88,11 @@ const leerVerhandlungsFormular = {
   zielpreis: "",
   schmerzgrenze: "",
   wiedervorlage: "",
+  notizen: "",
+};
+
+const leerEigeneFirma = {
+  name: "",
   notizen: "",
 };
 
@@ -135,6 +143,7 @@ const leerFahrzeugFormular = {
   ansprechpartner: "",
   telefon: "",
   email: "",
+  bestelltermin: "",
   gewuenschterLiefertermin: "",
   voraussichtlicherLiefertermin: "",
   wiedervorlage: "",
@@ -235,9 +244,15 @@ export default function Verhandlungen() {
   const [lieferantenBearbeitungsId, setLieferantenBearbeitungsId] =
     useState(null);
 
+  const [eigeneFirmen, setEigeneFirmen] = useState([]);
+  const [eigeneFirmenDialogOffen, setEigeneFirmenDialogOffen] = useState(false);
+  const [eigeneFirmaFormular, setEigeneFirmaFormular] = useState(leerEigeneFirma);
+  const [eigeneFirmaBearbeitungsId, setEigeneFirmaBearbeitungsId] = useState(null);
+
   const [suche, setSuche] = useState("");
   const [statusFilter, setStatusFilter] = useState("Alle");
   const [prioritaetFilter, setPrioritaetFilter] = useState("Alle");
+  const [auftraggeberFilter, setAuftraggeberFilter] = useState("Alle");
   const [sortierung, setSortierung] = useState("firma");
   const [sortRichtung, setSortRichtung] = useState("asc");
 
@@ -288,6 +303,11 @@ export default function Verhandlungen() {
       where("userId", "==", benutzer.uid)
     );
 
+    const eigeneFirmenAbfrage = query(
+      collection(db, "verhandlungsFirmen"),
+      where("userId", "==", benutzer.uid)
+    );
+
     const fahrzeugAbfrage = query(
       collection(db, "fahrzeugverhandlungen"),
       where("userId", "==", benutzer.uid)
@@ -328,6 +348,14 @@ export default function Verhandlungen() {
       }
     );
 
+    const eigeneFirmenAbmelden = onSnapshot(
+      eigeneFirmenAbfrage,
+      (snapshot) => {
+        setEigeneFirmen(snapshot.docs.map((eintrag) => ({ id: eintrag.id, ...eintrag.data() })).sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), "de")));
+      },
+      (error) => { console.error(error); setFehler("Die eigenen Firmen konnten nicht geladen werden. Bitte Firestore-Regeln prüfen."); }
+    );
+
     const fahrzeugAbmelden = onSnapshot(
       fahrzeugAbfrage,
       (snapshot) => {
@@ -349,6 +377,7 @@ export default function Verhandlungen() {
     return () => {
       verhandlungenAbmelden();
       lieferantenAbmelden();
+      eigeneFirmenAbmelden();
       fahrzeugAbmelden();
     };
   }, []);
@@ -403,9 +432,11 @@ export default function Verhandlungen() {
       const passtPrioritaet =
         prioritaetFilter === "Alle" ||
         eintrag.prioritaet === prioritaetFilter;
+      const passtAuftraggeber = auftraggeberFilter === "Alle" || eintrag.auftraggeberId === auftraggeberFilter;
       const passtSuche =
         suchbegriff === "" ||
         eintrag.firma?.toLowerCase().includes(suchbegriff) ||
+        eintrag.auftraggeberName?.toLowerCase().includes(suchbegriff) ||
         eintrag.verhandlungsgegenstand
           ?.toLowerCase()
           .includes(suchbegriff) ||
@@ -414,7 +445,7 @@ export default function Verhandlungen() {
         eintrag.email?.toLowerCase().includes(suchbegriff) ||
         eintrag.notizen?.toLowerCase().includes(suchbegriff);
 
-      return passtStatus && passtPrioritaet && passtSuche;
+      return passtStatus && passtPrioritaet && passtAuftraggeber && passtSuche;
     });
 
     return [...gefiltert].sort((a, b) => {
@@ -444,6 +475,7 @@ export default function Verhandlungen() {
     suche,
     statusFilter,
     prioritaetFilter,
+    auftraggeberFilter,
     sortierung,
     sortRichtung,
   ]);
@@ -522,6 +554,12 @@ export default function Verhandlungen() {
   function verhandlungsFeldAendern(event) {
     const { name, value } = event.target;
 
+    if (name === "auftraggeberId") {
+      const ausgewaehlt = eigeneFirmen.find((firma) => firma.id === value);
+      setVerhandlungsFormular((vorher) => ({ ...vorher, auftraggeberId: value, auftraggeberName: ausgewaehlt?.name || "" }));
+      return;
+    }
+
     if (name === "lieferantId") {
       const ausgewaehlt = lieferanten.find((lieferant) => lieferant.id === value);
 
@@ -553,7 +591,7 @@ export default function Verhandlungen() {
   }
 
   function neueVerhandlungOeffnen() {
-    setVerhandlungsFormular(leerVerhandlungsFormular);
+    setVerhandlungsFormular({ ...leerVerhandlungsFormular, verhandlungstag: heuteText() });
     setVerhandlungsBearbeitungsId(null);
     setFehler("");
     setVerhandlungsDialogOffen(true);
@@ -561,6 +599,9 @@ export default function Verhandlungen() {
 
   function verhandlungBearbeitenOeffnen(eintrag) {
     setVerhandlungsFormular({
+      auftraggeberId: eintrag.auftraggeberId ?? "",
+      auftraggeberName: eintrag.auftraggeberName ?? "",
+      verhandlungstag: eintrag.verhandlungstag ?? "",
       lieferantId: eintrag.lieferantId ?? "",
       firma: eintrag.firma ?? "",
       verhandlungsgegenstand: eintrag.verhandlungsgegenstand ?? "",
@@ -618,6 +659,8 @@ export default function Verhandlungen() {
   }
 
   async function verhandlungSpeichern() {
+    if (!verhandlungsFormular.auftraggeberId) { setFehler("Bitte zuerst die Firma auswählen, für die verhandelt wird."); return; }
+
     if (!verhandlungsFormular.firma.trim()) {
       setFehler("Bitte eine Firma eintragen oder einen Lieferanten auswählen.");
       return;
@@ -635,6 +678,7 @@ export default function Verhandlungen() {
     const daten = {
       ...verhandlungsFormular,
       firma: verhandlungsFormular.firma.trim(),
+      auftraggeberName: verhandlungsFormular.auftraggeberName.trim(),
       verhandlungsgegenstand:
         verhandlungsFormular.verhandlungsgegenstand.trim(),
       userId: benutzer.uid,
@@ -714,6 +758,34 @@ export default function Verhandlungen() {
     } finally {
       setSpeichert(false);
     }
+  }
+
+  function eigeneFirmaBearbeiten(eintrag) {
+    setEigeneFirmaFormular({ name: eintrag.name || "", notizen: eintrag.notizen || "" });
+    setEigeneFirmaBearbeitungsId(eintrag.id);
+  }
+
+  async function eigeneFirmaSpeichern() {
+    const name = eigeneFirmaFormular.name.trim();
+    if (!name) { setFehler("Bitte einen Firmennamen eintragen."); return; }
+    const benutzer = auth.currentUser;
+    if (!benutzer) return;
+    setSpeichert(true);
+    try {
+      const daten = { name, notizen: eigeneFirmaFormular.notizen.trim(), userId: benutzer.uid, geaendertAm: serverTimestamp() };
+      if (eigeneFirmaBearbeitungsId) await updateDoc(doc(db, "verhandlungsFirmen", eigeneFirmaBearbeitungsId), daten);
+      else await addDoc(collection(db, "verhandlungsFirmen"), { ...daten, erstelltAm: serverTimestamp() });
+      setEigeneFirmaFormular(leerEigeneFirma);
+      setEigeneFirmaBearbeitungsId(null);
+      setFehler("");
+    } catch (error) { console.error(error); setFehler("Die Firma konnte nicht gespeichert werden. Bitte Firestore-Regeln prüfen."); }
+    finally { setSpeichert(false); }
+  }
+
+  async function eigeneFirmaLoeschen(eintrag) {
+    if (!window.confirm(`Firma „${eintrag.name}“ wirklich löschen? Bestehende Verhandlungen bleiben erhalten.`)) return;
+    try { await deleteDoc(doc(db, "verhandlungsFirmen", eintrag.id)); if (auftraggeberFilter === eintrag.id) setAuftraggeberFilter("Alle"); }
+    catch (error) { console.error(error); setFehler("Die Firma konnte nicht gelöscht werden."); }
   }
 
   async function verhandlungLoeschen(eintrag) {
@@ -1000,8 +1072,8 @@ export default function Verhandlungen() {
     if (!auswahl.length) return;
     const zeilen = auswahl.map((eintrag) => `
       <tr>
-        <td>${htmlSicher(eintrag.status)}</td>
-        <td><strong>${htmlSicher(eintrag.firma)}</strong><br>${htmlSicher(eintrag.verhandlungsgegenstand || "Kein Gegenstand hinterlegt")}</td>
+        <td>${htmlSicher(eintrag.status)}<br><small>${htmlSicher(eintrag.verhandlungstag ? datumFormat(eintrag.verhandlungstag) : "Kein Verhandlungstag")}</small></td>
+        <td><small>Für: ${htmlSicher(eintrag.auftraggeberName || "—")}</small><br><strong>${htmlSicher(eintrag.firma)}</strong><br>${htmlSicher(eintrag.verhandlungsgegenstand || "Kein Gegenstand hinterlegt")}</td>
         <td><strong>${htmlSicher(eintrag.ansprechpartner || "—")}</strong><br><small>${htmlSicher(eintrag.telefon || "Keine Telefonnummer")}<br>${htmlSicher(eintrag.email || "Keine E-Mail")}</small></td>
         <td>${htmlSicher(eintrag.wiedervorlage ? datumFormat(eintrag.wiedervorlage) : "—")}</td>
         <td>${htmlSicher(euroFormat(eintrag.aktuellesAngebot))}<br><small>Ersparnis: ${htmlSicher(euroFormat(einsparung(eintrag)))} (${htmlSicher(prozentFormat(einsparungProzent(eintrag)))})</small></td>
@@ -1107,6 +1179,11 @@ export default function Verhandlungen() {
           spacing={1}
           alignSelf={{ xs: "stretch", md: "center" }}
         >
+          {ansicht === "verhandlungen" && (
+            <Button variant="outlined" startIcon={<BusinessIcon />} onClick={() => { setEigeneFirmaFormular(leerEigeneFirma); setEigeneFirmaBearbeitungsId(null); setEigeneFirmenDialogOffen(true); }} sx={{ minHeight: 48, px: 2.5, whiteSpace: "nowrap" }}>
+              Firmen verwalten
+            </Button>
+          )}
           {ansicht === "verhandlungen" && (
             <Button
               variant="outlined"
@@ -1223,9 +1300,10 @@ export default function Verhandlungen() {
                 </AccordionSummary>
                 <AccordionDetails>
                   <Grid container spacing={2}>
-                    <Grid size={{ xs: 12, md: 4 }}><Typography variant="caption" color="text.secondary">Gewünschter Liefertermin</Typography><Typography fontWeight={700}>{eintrag.gewuenschterLiefertermin ? datumFormat(eintrag.gewuenschterLiefertermin) : "—"}</Typography></Grid>
-                    <Grid size={{ xs: 12, md: 4 }}><Typography variant="caption" color="text.secondary">Voraussichtlicher Liefertermin</Typography><Typography fontWeight={700}>{eintrag.voraussichtlicherLiefertermin ? datumFormat(eintrag.voraussichtlicherLiefertermin) : "—"}</Typography></Grid>
-                    <Grid size={{ xs: 12, md: 4 }}><Typography variant="caption" color="text.secondary">Ansprechpartner</Typography><Typography fontWeight={700}>{eintrag.ansprechpartner || "—"}</Typography></Grid>
+                    <Grid size={{ xs: 12, md: 3 }}><Typography variant="caption" color="text.secondary">Bestelltermin</Typography><Typography fontWeight={700}>{eintrag.bestelltermin ? datumFormat(eintrag.bestelltermin) : "—"}</Typography></Grid>
+                    <Grid size={{ xs: 12, md: 3 }}><Typography variant="caption" color="text.secondary">Gewünschter Liefertermin</Typography><Typography fontWeight={700}>{eintrag.gewuenschterLiefertermin ? datumFormat(eintrag.gewuenschterLiefertermin) : "—"}</Typography></Grid>
+                    <Grid size={{ xs: 12, md: 3 }}><Typography variant="caption" color="text.secondary">Voraussichtlicher Liefertermin</Typography><Typography fontWeight={700}>{eintrag.voraussichtlicherLiefertermin ? datumFormat(eintrag.voraussichtlicherLiefertermin) : "—"}</Typography></Grid>
+                    <Grid size={{ xs: 12, md: 3 }}><Typography variant="caption" color="text.secondary">Ansprechpartner</Typography><Typography fontWeight={700}>{eintrag.ansprechpartner || "—"}</Typography></Grid>
                   </Grid>
                   <Divider sx={{ my: 2 }} />
                   <Stack spacing={1}>
@@ -1285,11 +1363,11 @@ export default function Verhandlungen() {
 
           <Paper sx={{ p: 2, mb: 3 }}>
             <Grid container spacing={2}>
-              <Grid size={{ xs: 12, md: 6 }}>
+              <Grid size={{ xs: 12, lg: 5 }}>
                 <TextField
                   fullWidth
                   label="Suchen"
-                  placeholder="Firma, Verhandlungsgegenstand, Ansprechpartner, Kategorie, E-Mail oder Notiz"
+                  placeholder="Auftraggeber, Lieferant, Verhandlungsgegenstand, Ansprechpartner oder Notiz"
                   value={suche}
                   onChange={(event) => setSuche(event.target.value)}
                   slotProps={{
@@ -1304,7 +1382,14 @@ export default function Verhandlungen() {
                 />
               </Grid>
 
-              <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+              <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
+                <TextField select fullWidth label="Firma (Auftraggeber)" value={auftraggeberFilter} onChange={(event) => setAuftraggeberFilter(event.target.value)}>
+                  <MenuItem value="Alle">Alle Firmen</MenuItem>
+                  {eigeneFirmen.map((firma) => <MenuItem key={firma.id} value={firma.id}>{firma.name}</MenuItem>)}
+                </TextField>
+              </Grid>
+
+              <Grid size={{ xs: 12, sm: 6, lg: 2 }}>
                 <TextField
                   select
                   fullWidth
@@ -1320,7 +1405,7 @@ export default function Verhandlungen() {
                 </TextField>
               </Grid>
 
-              <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+              <Grid size={{ xs: 12, sm: 6, lg: 2 }}>
                 <TextField
                   select
                   fullWidth
@@ -1365,6 +1450,7 @@ export default function Verhandlungen() {
                         <Typography color="text.secondary">
                           {eintrag.ansprechpartner || "Kein Ansprechpartner"}
                         </Typography>
+                        <Typography variant="caption" color="text.secondary">Für {eintrag.auftraggeberName || "keine Firma zugeordnet"} · Verhandlungstag: {datumFormat(eintrag.verhandlungstag)}</Typography>
                       </Box>
                       <Box sx={{ whiteSpace: "nowrap" }}>
                         <Tooltip title="Ersparnis berechnen">
@@ -1480,6 +1566,8 @@ export default function Verhandlungen() {
               <Table stickyHeader>
                 <TableHead>
                   <TableRow>
+                    <TableCell>Für Firma</TableCell>
+                    <TableCell>Verhandlungstag</TableCell>
                     <TableCell>
                       <TableSortLabel
                         active={sortierung === "firma"}
@@ -1517,6 +1605,8 @@ export default function Verhandlungen() {
                 <TableBody>
                   {gefilterteVerhandlungen.map((eintrag) => (
                     <TableRow hover key={eintrag.id}>
+                      <TableCell><Typography fontWeight={700}>{eintrag.auftraggeberName || "—"}</Typography></TableCell>
+                      <TableCell>{datumFormat(eintrag.verhandlungstag)}</TableCell>
                       <TableCell>
                         <Typography fontWeight={700}>
                           {eintrag.firma}
@@ -1951,6 +2041,15 @@ export default function Verhandlungen() {
         </DialogTitle>
         <DialogContent>
           <Grid container spacing={2} mt={0.5}>
+            <Grid size={{ xs: 12, md: 6 }}>
+              <TextField select required fullWidth label="Firma, für die verhandelt wird" name="auftraggeberId" value={verhandlungsFormular.auftraggeberId} onChange={verhandlungsFeldAendern} helperText={eigeneFirmen.length ? "Auftraggeber auswählen" : "Bitte zuerst über ‚Firmen verwalten‘ eine Firma anlegen"}>
+                <MenuItem value="">Bitte auswählen</MenuItem>
+                {eigeneFirmen.map((firma) => <MenuItem key={firma.id} value={firma.id}>{firma.name}</MenuItem>)}
+              </TextField>
+            </Grid>
+            <Grid size={{ xs: 12, md: 6 }}>
+              <TextField fullWidth type="date" label="Verhandlungstag" name="verhandlungstag" value={verhandlungsFormular.verhandlungstag} onChange={verhandlungsFeldAendern} InputLabelProps={{ shrink: true }} />
+            </Grid>
             <Grid size={{ xs: 12 }}>
               <TextField
                 select
@@ -2157,6 +2256,25 @@ export default function Verhandlungen() {
             {speichert ? "Speichert..." : "Speichern"}
           </Button>
         </DialogActions>
+      </Dialog>
+
+      <Dialog open={eigeneFirmenDialogOffen} onClose={() => setEigeneFirmenDialogOffen(false)} fullWidth maxWidth="sm">
+        <DialogTitle>Firmen verwalten</DialogTitle>
+        <DialogContent dividers>
+          <Typography color="text.secondary" sx={{ mb: 2 }}>Diese Firmen stehen anschließend beim Anlegen und Filtern von Verhandlungen als Auftraggeber zur Auswahl.</Typography>
+          <Stack spacing={1.5}>
+            <TextField fullWidth required label="Firmenname" value={eigeneFirmaFormular.name} onChange={(event) => setEigeneFirmaFormular((vorher) => ({ ...vorher, name: event.target.value }))} />
+            <TextField fullWidth label="Notiz" value={eigeneFirmaFormular.notizen} onChange={(event) => setEigeneFirmaFormular((vorher) => ({ ...vorher, notizen: event.target.value }))} />
+            <Stack direction="row" spacing={1}>
+              <Button variant="contained" onClick={eigeneFirmaSpeichern} disabled={speichert}>{eigeneFirmaBearbeitungsId ? "Änderung speichern" : "Firma anlegen"}</Button>
+              {eigeneFirmaBearbeitungsId && <Button onClick={() => { setEigeneFirmaFormular(leerEigeneFirma); setEigeneFirmaBearbeitungsId(null); }}>Abbrechen</Button>}
+            </Stack>
+            <Divider />
+            {!eigeneFirmen.length && <Alert severity="info">Noch keine Firmen angelegt.</Alert>}
+            {eigeneFirmen.map((firma) => <Paper key={firma.id} variant="outlined" sx={{ p: 1.5 }}><Stack direction="row" justifyContent="space-between" alignItems="center" spacing={1}><Box><Typography fontWeight={800}>{firma.name}</Typography>{firma.notizen && <Typography variant="body2" color="text.secondary">{firma.notizen}</Typography>}</Box><Stack direction="row"><IconButton onClick={() => eigeneFirmaBearbeiten(firma)}><EditIcon /></IconButton><IconButton color="error" onClick={() => eigeneFirmaLoeschen(firma)}><DeleteIcon /></IconButton></Stack></Stack></Paper>)}
+          </Stack>
+        </DialogContent>
+        <DialogActions><Button onClick={() => setEigeneFirmenDialogOffen(false)}>Schließen</Button></DialogActions>
       </Dialog>
 
       <Dialog
@@ -2518,9 +2636,10 @@ export default function Verhandlungen() {
             <Grid size={{ xs: 12, md: 6 }}><TextField fullWidth label="Verhandlungsgegenstand" placeholder="z. B. Ersatzbeschaffung Werkstattfahrzeuge" name="beschreibung" value={fahrzeugFormular.beschreibung} onChange={fahrzeugFeldAendern} /></Grid>
             <Grid size={{ xs: 6, md: 3 }}><TextField select fullWidth label="Beschaffungsart" name="beschaffungsart" value={fahrzeugFormular.beschaffungsart} onChange={fahrzeugFeldAendern}><MenuItem value="Leasing">Leasing</MenuItem><MenuItem value="Kauf">Kauf</MenuItem></TextField></Grid>
             <Grid size={{ xs: 6, md: 3 }}><TextField select fullWidth label="Status" name="status" value={fahrzeugFormular.status} onChange={fahrzeugFeldAendern}>{["Offen", "In Verhandlung", "Bestellt", "Geliefert", "Abgebrochen"].map((wert) => <MenuItem key={wert} value={wert}>{wert}</MenuItem>)}</TextField></Grid>
-            <Grid size={{ xs: 12, md: 4 }}><TextField fullWidth type="date" label="Gewünschter Liefertermin" name="gewuenschterLiefertermin" value={fahrzeugFormular.gewuenschterLiefertermin} onChange={fahrzeugFeldAendern} slotProps={{ inputLabel: { shrink: true } }} /></Grid>
-            <Grid size={{ xs: 12, md: 4 }}><TextField fullWidth type="date" label="Voraussichtlicher Liefertermin" name="voraussichtlicherLiefertermin" value={fahrzeugFormular.voraussichtlicherLiefertermin} onChange={fahrzeugFeldAendern} slotProps={{ inputLabel: { shrink: true } }} /></Grid>
-            <Grid size={{ xs: 12, md: 4 }}><TextField fullWidth type="date" label="Wiedervorlage" name="wiedervorlage" value={fahrzeugFormular.wiedervorlage} onChange={fahrzeugFeldAendern} slotProps={{ inputLabel: { shrink: true } }} /></Grid>
+            <Grid size={{ xs: 12, md: 3 }}><TextField fullWidth type="date" label="Bestelltermin" name="bestelltermin" value={fahrzeugFormular.bestelltermin} onChange={fahrzeugFeldAendern} slotProps={{ inputLabel: { shrink: true } }} /></Grid>
+            <Grid size={{ xs: 12, md: 3 }}><TextField fullWidth type="date" label="Gewünschter Liefertermin" name="gewuenschterLiefertermin" value={fahrzeugFormular.gewuenschterLiefertermin} onChange={fahrzeugFeldAendern} slotProps={{ inputLabel: { shrink: true } }} /></Grid>
+            <Grid size={{ xs: 12, md: 3 }}><TextField fullWidth type="date" label="Voraussichtlicher Liefertermin" name="voraussichtlicherLiefertermin" value={fahrzeugFormular.voraussichtlicherLiefertermin} onChange={fahrzeugFeldAendern} slotProps={{ inputLabel: { shrink: true } }} /></Grid>
+            <Grid size={{ xs: 12, md: 3 }}><TextField fullWidth type="date" label="Wiedervorlage" name="wiedervorlage" value={fahrzeugFormular.wiedervorlage} onChange={fahrzeugFeldAendern} slotProps={{ inputLabel: { shrink: true } }} /></Grid>
             <Grid size={{ xs: 12, md: 4 }}><TextField fullWidth label="Ansprechpartner" name="ansprechpartner" value={fahrzeugFormular.ansprechpartner} onChange={fahrzeugFeldAendern} /></Grid>
             <Grid size={{ xs: 12, md: 4 }}><TextField fullWidth label="Telefon" name="telefon" value={fahrzeugFormular.telefon} onChange={fahrzeugFeldAendern} /></Grid>
             <Grid size={{ xs: 12, md: 4 }}><TextField fullWidth label="E-Mail" name="email" value={fahrzeugFormular.email} onChange={fahrzeugFeldAendern} /></Grid>
