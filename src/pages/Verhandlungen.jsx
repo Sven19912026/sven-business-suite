@@ -1287,7 +1287,7 @@ eintrag.status !== "Verloren"
     const aktuellesFahrzeug = (eintrag.fahrzeuge || [])[fahrzeugIndex];
     if (!aktuellesFahrzeug) return;
 
-    const wirdErledigt = !Boolean(aktuellesFahrzeug.erledigt);
+    const wirdErledigt = !aktuellesFahrzeug.erledigt;
     const speicherSchluessel = `${eintrag.id}-${fahrzeugIndex}`;
     const aktualisierteFahrzeuge = (eintrag.fahrzeuge || []).map(
       (fahrzeug, index) =>
