@@ -1,4 +1,4 @@
-// UPDATE: Liefertermin-Auswahl Datum / Monat / Quartal bei Verhandlungen und Fahrzeugen
+// UPDATE: Liefertermin-Auswahl plus Fahrzeugarchiv mit Einzel-Abhaken, Suche und Wiederherstellen
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
@@ -151,6 +151,8 @@ function neuesFahrzeug() {
     listenpreis: "",
     angebotspreis: "",
     kennzeichenOderReferenz: "",
+    erledigt: false,
+    erledigtAm: "",
   };
 }
 
@@ -468,6 +470,7 @@ export default function Verhandlungen({
   const [fahrzeugDialogOffen, setFahrzeugDialogOffen] = useState(false);
   const [fahrzeugBearbeitungsId, setFahrzeugBearbeitungsId] = useState(null);
   const [fahrzeugSuche, setFahrzeugSuche] = useState("");
+  const [fahrzeugStatusWirdGespeichert, setFahrzeugStatusWirdGespeichert] = useState("");
 
   useEffect(() => {
     const benutzer = auth.currentUser;
@@ -712,34 +715,72 @@ eintrag.status !== "Verloren"
     lieferantenStatusFilter,
   ]);
 
+  const fahrzeugZaehler = useMemo(() => {
+    return fahrzeugverhandlungen.reduce(
+      (summe, eintrag) => {
+        (eintrag.fahrzeuge || []).forEach((fahrzeug) => {
+          const anzahl = Math.max(Number(fahrzeug.anzahl) || 1, 1);
+          if (fahrzeug.erledigt) summe.erledigt += anzahl;
+          else summe.offen += anzahl;
+        });
+        return summe;
+      },
+      { offen: 0, erledigt: 0 }
+    );
+  }, [fahrzeugverhandlungen]);
+
   const gefilterteFahrzeugverhandlungen = useMemo(() => {
     const suchbegriff = fahrzeugSuche.trim().toLowerCase();
 
-    return [...fahrzeugverhandlungen]
-      .filter((eintrag) => {
-        const fahrzeugText = (eintrag.fahrzeuge || [])
-          .map((fahrzeug) =>
-            [fahrzeug.hersteller, fahrzeug.modell, fahrzeug.ausstattung]
-              .filter(Boolean)
-              .join(" ")
-          )
-          .join(" ")
-          .toLowerCase();
+    const filtern = (erledigtGesucht) =>
+      [...fahrzeugverhandlungen]
+        .map((eintrag) => {
+          const kopfText = [
+            eintrag.firma,
+            eintrag.beschreibung,
+            eintrag.beschaffungsart,
+            eintrag.status,
+            eintrag.ansprechpartner,
+            eintrag.notizen,
+          ]
+            .filter(Boolean)
+            .join(" ")
+            .toLowerCase();
+          const kopfPasst = !suchbegriff || kopfText.includes(suchbegriff);
 
-        return (
-          !suchbegriff ||
-          eintrag.firma?.toLowerCase().includes(suchbegriff) ||
-          eintrag.beschreibung?.toLowerCase().includes(suchbegriff) ||
-          eintrag.beschaffungsart?.toLowerCase().includes(suchbegriff) ||
-          eintrag.status?.toLowerCase().includes(suchbegriff) ||
-          fahrzeugText.includes(suchbegriff)
+          const sichtbareFahrzeuge = (eintrag.fahrzeuge || [])
+            .map((fahrzeug, originalIndex) => ({
+              ...fahrzeug,
+              _originalIndex: originalIndex,
+            }))
+            .filter((fahrzeug) => Boolean(fahrzeug.erledigt) === erledigtGesucht)
+            .filter((fahrzeug) => {
+              if (!suchbegriff || kopfPasst) return true;
+              const fahrzeugText = [
+                fahrzeug.hersteller,
+                fahrzeug.modell,
+                fahrzeug.ausstattung,
+                fahrzeug.kennzeichenOderReferenz,
+              ]
+                .filter(Boolean)
+                .join(" ")
+                .toLowerCase();
+              return fahrzeugText.includes(suchbegriff);
+            });
+
+          return { ...eintrag, sichtbareFahrzeuge };
+        })
+        .filter((eintrag) => eintrag.sichtbareFahrzeuge.length > 0)
+        .sort((a, b) =>
+          lieferterminSortierwert(a, "gewuenschterLiefertermin").localeCompare(
+            lieferterminSortierwert(b, "gewuenschterLiefertermin")
+          )
         );
-      })
-      .sort((a, b) =>
-        lieferterminSortierwert(a, "gewuenschterLiefertermin").localeCompare(
-          lieferterminSortierwert(b, "gewuenschterLiefertermin")
-        )
-      );
+
+    return {
+      offen: filtern(false),
+      erledigt: filtern(true),
+    };
   }, [fahrzeugverhandlungen, fahrzeugSuche]);
 
   function sortieren(feld) {
@@ -1208,6 +1249,23 @@ eintrag.status !== "Verloren"
     }));
   }
 
+  function fahrzeugZeileErledigtAendern(id, erledigt) {
+    setFahrzeugFormular((vorher) => ({
+      ...vorher,
+      fahrzeuge: vorher.fahrzeuge.map((fahrzeug) =>
+        fahrzeug.id === id
+          ? {
+              ...fahrzeug,
+              erledigt,
+              erledigtAm: erledigt
+                ? fahrzeug.erledigtAm || new Date().toISOString()
+                : "",
+            }
+          : fahrzeug
+      ),
+    }));
+  }
+
   function fahrzeugZeileHinzufuegen() {
     setFahrzeugFormular((vorher) => ({
       ...vorher,
@@ -1225,6 +1283,40 @@ eintrag.status !== "Verloren"
     }));
   }
 
+  async function fahrzeugErledigtUmschalten(eintrag, fahrzeugIndex) {
+    const aktuellesFahrzeug = (eintrag.fahrzeuge || [])[fahrzeugIndex];
+    if (!aktuellesFahrzeug) return;
+
+    const wirdErledigt = !Boolean(aktuellesFahrzeug.erledigt);
+    const speicherSchluessel = `${eintrag.id}-${fahrzeugIndex}`;
+    const aktualisierteFahrzeuge = (eintrag.fahrzeuge || []).map(
+      (fahrzeug, index) =>
+        index === fahrzeugIndex
+          ? {
+              ...fahrzeug,
+              erledigt: wirdErledigt,
+              erledigtAm: wirdErledigt ? new Date().toISOString() : "",
+            }
+          : fahrzeug
+    );
+
+    setFahrzeugStatusWirdGespeichert(speicherSchluessel);
+    setFehler("");
+    try {
+      await updateDoc(doc(db, "fahrzeugverhandlungen", eintrag.id), {
+        fahrzeuge: aktualisierteFahrzeuge,
+        geaendertAm: serverTimestamp(),
+      });
+    } catch (error) {
+      console.error(error);
+      setFehler(
+        "Der Fahrzeugstatus konnte nicht gespeichert werden. Bitte Firestore-Regeln prüfen."
+      );
+    } finally {
+      setFahrzeugStatusWirdGespeichert("");
+    }
+  }
+
   async function fahrzeugVorhabenSpeichern() {
     if (!fahrzeugFormular.firma.trim()) {
       setFehler("Bitte einen Händler oder Lieferanten eintragen.");
@@ -1239,6 +1331,10 @@ eintrag.status !== "Verloren"
         anzahl: Math.max(Number(fahrzeug.anzahl) || 1, 1),
         listenpreis: euroWert(fahrzeug.listenpreis),
         angebotspreis: euroWert(fahrzeug.angebotspreis),
+        erledigt: Boolean(fahrzeug.erledigt),
+        erledigtAm: fahrzeug.erledigt
+          ? fahrzeug.erledigtAm || new Date().toISOString()
+          : "",
       }))
       .filter((fahrzeug) => fahrzeug.hersteller || fahrzeug.modell);
 
@@ -1434,6 +1530,92 @@ eintrag.status !== "Verloren"
     },
   ];
 
+
+  function fahrzeugVorhabenListe(eintraege, leertext) {
+    return (
+      <Stack spacing={1.5}>
+        {eintraege.map((eintrag) => (
+          <Accordion key={eintrag.id} disableGutters>
+            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+              <Stack direction={{ xs: "column", md: "row" }} spacing={1.5} alignItems={{ xs: "flex-start", md: "center" }} sx={{ width: "100%", pr: 1 }}>
+                <DirectionsCarIcon color="primary" />
+                <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+                  <Typography fontWeight={800}>{eintrag.firma}</Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    {eintrag.beschreibung || `${eintrag.sichtbareFahrzeuge.length} Fahrzeug(e)`}
+                  </Typography>
+                </Box>
+                <Chip size="small" label={eintrag.beschaffungsart || "—"} color="primary" variant="outlined" />
+                <Chip size="small" label={eintrag.status || "Offen"} color={statusFarbe(eintrag.status)} />
+                <Typography variant="body2" sx={{ minWidth: 180 }}>
+                  Erwartet: {lieferterminAnzeige(eintrag, "voraussichtlicherLiefertermin") === "—" ? "nicht bekannt" : lieferterminAnzeige(eintrag, "voraussichtlicherLiefertermin")}
+                </Typography>
+              </Stack>
+            </AccordionSummary>
+            <AccordionDetails>
+              <Grid container spacing={2}>
+                <Grid size={{ xs: 12, md: 3 }}><Typography variant="caption" color="text.secondary">Bestelltermin</Typography><Typography fontWeight={700}>{eintrag.bestelltermin ? datumFormat(eintrag.bestelltermin) : "—"}</Typography></Grid>
+                <Grid size={{ xs: 12, md: 3 }}><Typography variant="caption" color="text.secondary">Gewünschter Liefertermin</Typography><Typography fontWeight={700}>{lieferterminAnzeige(eintrag, "gewuenschterLiefertermin")}</Typography></Grid>
+                <Grid size={{ xs: 12, md: 3 }}><Typography variant="caption" color="text.secondary">Voraussichtlicher Liefertermin</Typography><Typography fontWeight={700}>{lieferterminAnzeige(eintrag, "voraussichtlicherLiefertermin")}</Typography></Grid>
+                <Grid size={{ xs: 12, md: 3 }}><Typography variant="caption" color="text.secondary">Ansprechpartner</Typography><Typography fontWeight={700}>{eintrag.ansprechpartner || "—"}</Typography></Grid>
+              </Grid>
+              <Divider sx={{ my: 2 }} />
+              <Stack spacing={1}>
+                {eintrag.sichtbareFahrzeuge.map((fahrzeug) => {
+                  const speicherSchluessel = `${eintrag.id}-${fahrzeug._originalIndex}`;
+                  return (
+                    <Paper key={fahrzeug.id || speicherSchluessel} variant="outlined" sx={{ p: 1.5 }}>
+                      <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" alignItems={{ xs: "stretch", md: "center" }} gap={1}>
+                        <Stack direction="row" spacing={1} alignItems="flex-start">
+                          <Checkbox
+                            checked={Boolean(fahrzeug.erledigt)}
+                            onChange={() => fahrzeugErledigtUmschalten(eintrag, fahrzeug._originalIndex)}
+                            disabled={fahrzeugStatusWirdGespeichert === speicherSchluessel}
+                            inputProps={{
+                              "aria-label": fahrzeug.erledigt
+                                ? "Fahrzeug wieder als offen markieren"
+                                : "Fahrzeug als bestellt und erledigt markieren",
+                            }}
+                          />
+                          <Box>
+                            <Typography fontWeight={800}>
+                              {fahrzeug.hersteller || "Hersteller offen"} {fahrzeug.modell || ""}
+                            </Typography>
+                            <Typography variant="body2" color="text.secondary">
+                              {fahrzeug.ausstattung || "Keine Ausstattung hinterlegt"}
+                              {" · "}Anzahl: {fahrzeug.anzahl || 1}
+                              {fahrzeug.kennzeichenOderReferenz ? ` · ${fahrzeug.kennzeichenOderReferenz}` : ""}
+                            </Typography>
+                            <Typography variant="caption" color={fahrzeug.erledigt ? "success.main" : "text.secondary"} fontWeight={700}>
+                              {fahrzeug.erledigt
+                                ? `Bestellt / erledigt${fahrzeug.erledigtAm ? ` am ${new Date(fahrzeug.erledigtAm).toLocaleDateString("de-DE")}` : ""}`
+                                : "Zum Archivieren abhaken"}
+                            </Typography>
+                          </Box>
+                        </Stack>
+                        <Box textAlign={{ xs: "left", md: "right" }}>
+                          <Typography variant="body2">Listenpreis: {euroFormat(fahrzeug.listenpreis)}</Typography>
+                          <Typography fontWeight={800}>Angebot: {euroFormat(fahrzeug.angebotspreis)}</Typography>
+                        </Box>
+                      </Stack>
+                    </Paper>
+                  );
+                })}
+              </Stack>
+              {(eintrag.leasingrate || eintrag.kaufpreis || eintrag.sonderzahlung) ? <Paper variant="outlined" sx={{ p: 1.5, mt: 2 }}><Stack direction={{ xs: "column", sm: "row" }} spacing={3}><Typography>Leasingrate: <strong>{euroFormat(eintrag.leasingrate)}</strong></Typography><Typography>Kaufpreis: <strong>{euroFormat(eintrag.kaufpreis)}</strong></Typography><Typography>Sonderzahlung: <strong>{euroFormat(eintrag.sonderzahlung)}</strong></Typography></Stack></Paper> : null}
+              {eintrag.notizen && <Typography sx={{ mt: 2, whiteSpace: "pre-wrap" }}>{eintrag.notizen}</Typography>}
+              <Stack direction="row" justifyContent="flex-end" spacing={1} mt={2}>
+                <Button startIcon={<EditIcon />} onClick={() => fahrzeugVorhabenBearbeiten(eintrag)}>Bearbeiten</Button>
+                <Button color="error" startIcon={<DeleteIcon />} onClick={() => fahrzeugVorhabenLoeschen(eintrag)}>Löschen</Button>
+              </Stack>
+            </AccordionDetails>
+          </Accordion>
+        ))}
+        {!eintraege.length && <Alert severity="info">{leertext}</Alert>}
+      </Stack>
+    );
+  }
+
   return (
     <Box>
       <Stack
@@ -1540,10 +1722,10 @@ eintrag.status !== "Verloren"
               <Card><CardContent><Typography color="text.secondary" fontWeight={700}>Fahrzeugvorhaben</Typography><Typography variant="h4" fontWeight={800}>{fahrzeugverhandlungen.length}</Typography></CardContent></Card>
             </Grid>
             <Grid size={{ xs: 12, sm: 4 }}>
-              <Card><CardContent><Typography color="text.secondary" fontWeight={700}>Leasing</Typography><Typography variant="h4" fontWeight={800}>{fahrzeugverhandlungen.filter((eintrag) => eintrag.beschaffungsart === "Leasing").length}</Typography></CardContent></Card>
+              <Card><CardContent><Typography color="text.secondary" fontWeight={700}>Offene Fahrzeuge</Typography><Typography variant="h4" fontWeight={800}>{fahrzeugZaehler.offen}</Typography></CardContent></Card>
             </Grid>
             <Grid size={{ xs: 12, sm: 4 }}>
-              <Card><CardContent><Typography color="text.secondary" fontWeight={700}>Kauf</Typography><Typography variant="h4" fontWeight={800}>{fahrzeugverhandlungen.filter((eintrag) => eintrag.beschaffungsart === "Kauf").length}</Typography></CardContent></Card>
+              <Card><CardContent><Typography color="text.secondary" fontWeight={700}>Erledigt / bestellt</Typography><Typography variant="h4" fontWeight={800}>{fahrzeugZaehler.erledigt}</Typography></CardContent></Card>
             </Grid>
           </Grid>
 
@@ -1551,61 +1733,47 @@ eintrag.status !== "Verloren"
             <TextField
               fullWidth
               label="Fahrzeuge suchen"
-              placeholder="Händler, Hersteller, Modell, Leasing, Kauf oder Status"
+              placeholder="Händler, Hersteller, Modell, Ausstattung oder Referenz"
               value={fahrzeugSuche}
               onChange={(event) => setFahrzeugSuche(event.target.value)}
               slotProps={{ input: { startAdornment: <InputAdornment position="start"><SearchIcon /></InputAdornment> } }}
             />
           </Paper>
 
-          <Stack spacing={1.5}>
-            {gefilterteFahrzeugverhandlungen.map((eintrag) => (
-              <Accordion key={eintrag.id} disableGutters>
-                <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                  <Stack direction={{ xs: "column", md: "row" }} spacing={1.5} alignItems={{ xs: "flex-start", md: "center" }} sx={{ width: "100%", pr: 1 }}>
-                    <DirectionsCarIcon color="primary" />
-                    <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-                      <Typography fontWeight={800}>{eintrag.firma}</Typography>
-                      <Typography variant="body2" color="text.secondary">
-                        {eintrag.beschreibung || `${(eintrag.fahrzeuge || []).length} Fahrzeug(e)`}
-                      </Typography>
-                    </Box>
-                    <Chip size="small" label={eintrag.beschaffungsart || "—"} color="primary" variant="outlined" />
-                    <Chip size="small" label={eintrag.status || "Offen"} color={statusFarbe(eintrag.status)} />
-                    <Typography variant="body2" sx={{ minWidth: 180 }}>
-                      Erwartet: {lieferterminAnzeige(eintrag, "voraussichtlicherLiefertermin") === "—" ? "nicht bekannt" : lieferterminAnzeige(eintrag, "voraussichtlicherLiefertermin")}
-                    </Typography>
-                  </Stack>
-                </AccordionSummary>
-                <AccordionDetails>
-                  <Grid container spacing={2}>
-                    <Grid size={{ xs: 12, md: 3 }}><Typography variant="caption" color="text.secondary">Bestelltermin</Typography><Typography fontWeight={700}>{eintrag.bestelltermin ? datumFormat(eintrag.bestelltermin) : "—"}</Typography></Grid>
-                    <Grid size={{ xs: 12, md: 3 }}><Typography variant="caption" color="text.secondary">Gewünschter Liefertermin</Typography><Typography fontWeight={700}>{lieferterminAnzeige(eintrag, "gewuenschterLiefertermin")}</Typography></Grid>
-                    <Grid size={{ xs: 12, md: 3 }}><Typography variant="caption" color="text.secondary">Voraussichtlicher Liefertermin</Typography><Typography fontWeight={700}>{lieferterminAnzeige(eintrag, "voraussichtlicherLiefertermin")}</Typography></Grid>
-                    <Grid size={{ xs: 12, md: 3 }}><Typography variant="caption" color="text.secondary">Ansprechpartner</Typography><Typography fontWeight={700}>{eintrag.ansprechpartner || "—"}</Typography></Grid>
-                  </Grid>
-                  <Divider sx={{ my: 2 }} />
-                  <Stack spacing={1}>
-                    {(eintrag.fahrzeuge || []).map((fahrzeug, index) => (
-                      <Paper key={fahrzeug.id || index} variant="outlined" sx={{ p: 1.5 }}>
-                        <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" gap={1}>
-                          <Box><Typography fontWeight={800}>{fahrzeug.hersteller || "Hersteller offen"} {fahrzeug.modell || ""}</Typography><Typography variant="body2" color="text.secondary">{fahrzeug.ausstattung || "Keine Ausstattung hinterlegt"} · Anzahl: {fahrzeug.anzahl || 1}</Typography></Box>
-                          <Box textAlign={{ xs: "left", md: "right" }}><Typography variant="body2">Listenpreis: {euroFormat(fahrzeug.listenpreis)}</Typography><Typography fontWeight={800}>Angebot: {euroFormat(fahrzeug.angebotspreis)}</Typography></Box>
-                        </Stack>
-                      </Paper>
-                    ))}
-                  </Stack>
-                  {(eintrag.leasingrate || eintrag.kaufpreis || eintrag.sonderzahlung) ? <Paper variant="outlined" sx={{ p: 1.5, mt: 2 }}><Stack direction={{ xs: "column", sm: "row" }} spacing={3}><Typography>Leasingrate: <strong>{euroFormat(eintrag.leasingrate)}</strong></Typography><Typography>Kaufpreis: <strong>{euroFormat(eintrag.kaufpreis)}</strong></Typography><Typography>Sonderzahlung: <strong>{euroFormat(eintrag.sonderzahlung)}</strong></Typography></Stack></Paper> : null}
-                  {eintrag.notizen && <Typography sx={{ mt: 2, whiteSpace: "pre-wrap" }}>{eintrag.notizen}</Typography>}
-                  <Stack direction="row" justifyContent="flex-end" spacing={1} mt={2}>
-                    <Button startIcon={<EditIcon />} onClick={() => fahrzeugVorhabenBearbeiten(eintrag)}>Bearbeiten</Button>
-                    <Button color="error" startIcon={<DeleteIcon />} onClick={() => fahrzeugVorhabenLoeschen(eintrag)}>Löschen</Button>
-                  </Stack>
-                </AccordionDetails>
-              </Accordion>
-            ))}
-            {!gefilterteFahrzeugverhandlungen.length && <Alert severity="info">Noch keine Fahrzeugverhandlung vorhanden.</Alert>}
-          </Stack>
+          <Typography variant="h6" fontWeight={850} sx={{ mb: 1.25 }}>
+            Offene Fahrzeuge ({fahrzeugZaehler.offen})
+          </Typography>
+          {fahrzeugVorhabenListe(
+            gefilterteFahrzeugverhandlungen.offen,
+            "Keine offenen Fahrzeuge gefunden."
+          )}
+
+          <Accordion disableGutters sx={{ mt: 2.5 }}>
+            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+              <Stack direction="row" spacing={1.25} alignItems="center">
+                <Checkbox
+                  checked={false}
+                  disabled
+                  size="small"
+                  sx={{ p: 0 }}
+                />
+                <Box>
+                  <Typography fontWeight={850}>
+                    Erledigt / bestellt ({fahrzeugZaehler.erledigt})
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Archivierte Fahrzeuge ein- oder ausblenden
+                  </Typography>
+                </Box>
+              </Stack>
+            </AccordionSummary>
+            <AccordionDetails>
+              {fahrzeugVorhabenListe(
+                gefilterteFahrzeugverhandlungen.erledigt,
+                "Keine erledigten oder bestellten Fahrzeuge gefunden."
+              )}
+            </AccordionDetails>
+          </Accordion>
         </>
       ) : ansicht === "verhandlungen" ? (
         <>
@@ -2990,7 +3158,26 @@ eintrag.status !== "Verloren"
             {fahrzeugFormular.fahrzeuge.map((fahrzeug, index) => (
               <Grid size={{ xs: 12 }} key={fahrzeug.id}>
                 <Paper variant="outlined" sx={{ p: 2 }}>
-                  <Stack direction="row" justifyContent="space-between" alignItems="center" mb={2}><Typography fontWeight={800}>Fahrzeug {index + 1}</Typography><IconButton color="error" disabled={fahrzeugFormular.fahrzeuge.length === 1} onClick={() => fahrzeugZeileEntfernen(fahrzeug.id)}><RemoveCircleOutlineIcon /></IconButton></Stack>
+                  <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ xs: "stretch", sm: "center" }} gap={1} mb={2}>
+                    <Typography fontWeight={800}>Fahrzeug {index + 1}</Typography>
+                    <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between">
+                      <Stack direction="row" spacing={0.5} alignItems="center">
+                        <Checkbox
+                          checked={Boolean(fahrzeug.erledigt)}
+                          onChange={(event) =>
+                            fahrzeugZeileErledigtAendern(
+                              fahrzeug.id,
+                              event.target.checked
+                            )
+                          }
+                        />
+                        <Typography variant="body2" fontWeight={700}>
+                          Bereits bestellt / erledigt
+                        </Typography>
+                      </Stack>
+                      <IconButton color="error" disabled={fahrzeugFormular.fahrzeuge.length === 1} onClick={() => fahrzeugZeileEntfernen(fahrzeug.id)}><RemoveCircleOutlineIcon /></IconButton>
+                    </Stack>
+                  </Stack>
                   <Grid container spacing={2}>
                     <Grid size={{ xs: 12, md: 3 }}><TextField fullWidth label="Hersteller" value={fahrzeug.hersteller} onChange={(event) => fahrzeugZeileAendern(fahrzeug.id, "hersteller", event.target.value)} /></Grid>
                     <Grid size={{ xs: 12, md: 3 }}><TextField fullWidth label="Modell" value={fahrzeug.modell} onChange={(event) => fahrzeugZeileAendern(fahrzeug.id, "modell", event.target.value)} /></Grid>
