@@ -1,3 +1,4 @@
+// UPDATE: Liefertermin-Auswahl Datum / Monat / Quartal bei Verhandlungen und Fahrzeugen
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
@@ -57,7 +58,9 @@ import DirectionsCarIcon from "@mui/icons-material/DirectionsCar";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 
 import {
+  Timestamp,
   collection,
+  deleteField,
   doc,
   query,
   serverTimestamp,
@@ -71,6 +74,16 @@ import {
 } from "../firebaseUsage";
 
 import { auth, db } from "../firebase";
+import Dokumentablage from "../components/Dokumentablage";
+import {
+  VERHANDLUNG_DOKUMENT_KATEGORIEN,
+  addiereTage,
+  alleDokumenteLoeschen,
+  dokumentFristenSynchronisieren,
+  istAbgeschlossenerStatus,
+  timestampZuDatum,
+  verhandlungsFristInitialisieren,
+} from "../services/dokumente";
 
 const leerVerhandlungsFormular = {
   auftraggeberId: "",
@@ -89,6 +102,12 @@ const leerVerhandlungsFormular = {
   aktuellesAngebot: "",
   zielpreis: "",
   schmerzgrenze: "",
+  lieferterminArt: "datum",
+  lieferterminDatum: "",
+  lieferterminMonat: "",
+  lieferterminQuartal: "1",
+  lieferterminJahr: "",
+  liefertermin: "",
   wiedervorlage: "",
   notizen: "",
 };
@@ -146,7 +165,17 @@ const leerFahrzeugFormular = {
   telefon: "",
   email: "",
   bestelltermin: "",
+  gewuenschterLieferterminArt: "datum",
+  gewuenschterLieferterminDatum: "",
+  gewuenschterLieferterminMonat: "",
+  gewuenschterLieferterminQuartal: "1",
+  gewuenschterLieferterminJahr: "",
   gewuenschterLiefertermin: "",
+  voraussichtlicherLieferterminArt: "datum",
+  voraussichtlicherLieferterminDatum: "",
+  voraussichtlicherLieferterminMonat: "",
+  voraussichtlicherLieferterminQuartal: "1",
+  voraussichtlicherLieferterminJahr: "",
   voraussichtlicherLiefertermin: "",
   wiedervorlage: "",
   laufzeitMonate: "",
@@ -172,6 +201,143 @@ function euroFormat(wert) {
 function datumFormat(wert) {
   if (!wert) return "—";
   return new Date(`${wert}T00:00:00`).toLocaleDateString("de-DE");
+}
+
+function lieferterminArtErmitteln(eintrag, praefix) {
+  if (eintrag?.[`${praefix}Art`]) return eintrag[`${praefix}Art`];
+  if (eintrag?.[`${praefix}Monat`]) return "monat";
+  if (eintrag?.[`${praefix}Jahr`] || eintrag?.[`${praefix}Quartal`]) return "quartal";
+  if (eintrag?.[`${praefix}Datum`] || eintrag?.[praefix]) return "datum";
+  return "datum";
+}
+
+function lieferterminFormularwerte(eintrag, praefix) {
+  return {
+    [`${praefix}Art`]: lieferterminArtErmitteln(eintrag, praefix),
+    [`${praefix}Datum`]: eintrag?.[`${praefix}Datum`] ?? eintrag?.[praefix] ?? "",
+    [`${praefix}Monat`]: eintrag?.[`${praefix}Monat`] ?? "",
+    [`${praefix}Quartal`]: String(eintrag?.[`${praefix}Quartal`] ?? "1").replace(/^Q/i, ""),
+    [`${praefix}Jahr`]: eintrag?.[`${praefix}Jahr`] ?? "",
+  };
+}
+
+function lieferterminAnzeige(eintrag, praefix = "liefertermin") {
+  const art = lieferterminArtErmitteln(eintrag, praefix);
+  const datum = eintrag?.[`${praefix}Datum`] || eintrag?.[praefix];
+  const monat = eintrag?.[`${praefix}Monat`];
+  const quartal = String(eintrag?.[`${praefix}Quartal`] || "").replace(/^Q/i, "");
+  const jahr = eintrag?.[`${praefix}Jahr`];
+
+  if (art === "monat" && monat) {
+    const [monatJahr, monatNummer] = monat.split("-");
+    const datumWert = new Date(Number(monatJahr), Number(monatNummer) - 1, 1);
+    return datumWert.toLocaleDateString("de-DE", { month: "long", year: "numeric" });
+  }
+
+  if (art === "quartal" && quartal && jahr) return `Q${quartal} ${jahr}`;
+  if (datum) return datumFormat(datum);
+  return "—";
+}
+
+function lieferterminSortierwert(eintrag, praefix = "liefertermin") {
+  const art = lieferterminArtErmitteln(eintrag, praefix);
+  const datum = eintrag?.[`${praefix}Datum`] || eintrag?.[praefix];
+  const monat = eintrag?.[`${praefix}Monat`];
+  const quartal = Number(String(eintrag?.[`${praefix}Quartal`] || "").replace(/^Q/i, ""));
+  const jahr = Number(eintrag?.[`${praefix}Jahr`]);
+
+  if (art === "monat" && monat) return `${monat}-01`;
+  if (art === "quartal" && quartal >= 1 && quartal <= 4 && jahr) {
+    return `${jahr}-${String((quartal - 1) * 3 + 1).padStart(2, "0")}-01`;
+  }
+  return datum || "9999-12-31";
+}
+
+function LieferterminEingabe({ formular, praefix, label, onChange }) {
+  const art = formular[`${praefix}Art`] || "datum";
+
+  return (
+    <Grid size={{ xs: 12 }}>
+      <Paper variant="outlined" sx={{ p: 2 }}>
+        <Typography fontWeight={800} sx={{ mb: 1.5 }}>{label}</Typography>
+        <Grid container spacing={2}>
+          <Grid size={{ xs: 12, sm: 4 }}>
+            <TextField
+              select
+              fullWidth
+              label="Angabe als"
+              name={`${praefix}Art`}
+              value={art}
+              onChange={onChange}
+            >
+              <MenuItem value="datum">Genaues Datum</MenuItem>
+              <MenuItem value="monat">Monat</MenuItem>
+              <MenuItem value="quartal">Quartal</MenuItem>
+            </TextField>
+          </Grid>
+
+          {art === "datum" && (
+            <Grid size={{ xs: 12, sm: 8 }}>
+              <TextField
+                fullWidth
+                type="date"
+                label="Genaues Datum"
+                name={`${praefix}Datum`}
+                value={formular[`${praefix}Datum`] || ""}
+                onChange={onChange}
+                slotProps={{ inputLabel: { shrink: true } }}
+              />
+            </Grid>
+          )}
+
+          {art === "monat" && (
+            <Grid size={{ xs: 12, sm: 8 }}>
+              <TextField
+                fullWidth
+                type="month"
+                label="Monat"
+                name={`${praefix}Monat`}
+                value={formular[`${praefix}Monat`] || ""}
+                onChange={onChange}
+                slotProps={{ inputLabel: { shrink: true } }}
+              />
+            </Grid>
+          )}
+
+          {art === "quartal" && (
+            <>
+              <Grid size={{ xs: 6, sm: 4 }}>
+                <TextField
+                  select
+                  fullWidth
+                  label="Quartal"
+                  name={`${praefix}Quartal`}
+                  value={String(formular[`${praefix}Quartal`] || "1").replace(/^Q/i, "")}
+                  onChange={onChange}
+                >
+                  {[1, 2, 3, 4].map((quartal) => (
+                    <MenuItem key={quartal} value={String(quartal)}>Q{quartal}</MenuItem>
+                  ))}
+                </TextField>
+              </Grid>
+              <Grid size={{ xs: 6, sm: 4 }}>
+                <TextField
+                  fullWidth
+                  type="number"
+                  label="Jahr"
+                  name={`${praefix}Jahr`}
+                  value={formular[`${praefix}Jahr`] || ""}
+                  onChange={onChange}
+                  inputProps={{ min: 2000, max: 2100, step: 1 }}
+                  placeholder={String(new Date().getFullYear())}
+                />
+              </Grid>
+            </>
+          )}
+        </Grid>
+      </Paper>
+    </Grid>
+  );
 }
 
 function heuteText() {
@@ -244,6 +410,7 @@ export default function Verhandlungen({
 
   const [ansicht, setAnsicht] = useState("verhandlungen");
   const initialNegotiationOpenedRef = useRef("");
+  const initialisierteDokumentFristenRef = useRef(new Set());
 
   const [verhandlungen, setVerhandlungen] = useState([]);
   const [verhandlungsFormular, setVerhandlungsFormular] = useState(
@@ -399,6 +566,20 @@ export default function Verhandlungen({
     };
   }, []);
 
+  useEffect(() => {
+    verhandlungen
+      .filter((eintrag) => istAbgeschlossenerStatus(statusNormalisieren(eintrag.status)))
+      .forEach((eintrag) => {
+        if (initialisierteDokumentFristenRef.current.has(eintrag.id)) return;
+        initialisierteDokumentFristenRef.current.add(eintrag.id);
+        verhandlungsFristInitialisieren(eintrag).catch((error) => {
+          console.error(error);
+          initialisierteDokumentFristenRef.current.delete(eintrag.id);
+          setFehler("Die Aufbewahrungsfrist der Verhandlungsdokumente konnte nicht geprüft werden.");
+        });
+      });
+  }, [verhandlungen]);
+
   const kennzahlen = useMemo(() => {
     const offen = verhandlungen.filter(
       (eintrag) =>
@@ -461,6 +642,7 @@ eintrag.status !== "Verloren"
         eintrag.ansprechpartner?.toLowerCase().includes(suchbegriff) ||
         eintrag.kategorie?.toLowerCase().includes(suchbegriff) ||
         eintrag.email?.toLowerCase().includes(suchbegriff) ||
+        lieferterminAnzeige(eintrag).toLowerCase().includes(suchbegriff) ||
         eintrag.notizen?.toLowerCase().includes(suchbegriff);
 
       return passtStatus && passtPrioritaet && passtAuftraggeber && passtSuche;
@@ -554,8 +736,8 @@ eintrag.status !== "Verloren"
         );
       })
       .sort((a, b) =>
-        String(a.gewuenschterLiefertermin || "9999-12-31").localeCompare(
-          String(b.gewuenschterLiefertermin || "9999-12-31")
+        lieferterminSortierwert(a, "gewuenschterLiefertermin").localeCompare(
+          lieferterminSortierwert(b, "gewuenschterLiefertermin")
         )
       );
   }, [fahrzeugverhandlungen, fahrzeugSuche]);
@@ -633,6 +815,8 @@ eintrag.status !== "Verloren"
       aktuellesAngebot: eintrag.aktuellesAngebot ?? "",
       zielpreis: eintrag.zielpreis ?? "",
       schmerzgrenze: eintrag.schmerzgrenze ?? "",
+      ...lieferterminFormularwerte(eintrag, "liefertermin"),
+      liefertermin: eintrag.liefertermin ?? "",
       wiedervorlage: eintrag.wiedervorlage ?? "",
       notizen: eintrag.notizen ?? "",
     });
@@ -724,10 +908,20 @@ eintrag.status !== "Verloren"
     setSpeichert(true);
     setFehler("");
 
+    const status = statusNormalisieren(verhandlungsFormular.status);
+    const istBeendet = istAbgeschlossenerStatus(status);
+    const bisherigerEintrag = verhandlungen.find(
+      (eintrag) => eintrag.id === verhandlungsBearbeitungsId
+    );
+    const vorhandeneFrist = timestampZuDatum(bisherigerEintrag?.dokumentLoeschdatum);
+    const dokumentLoeschdatum = istBeendet
+      ? (vorhandeneFrist || addiereTage(new Date()))
+      : null;
+
     const daten = {
-  ...verhandlungsFormular,
-  status: statusNormalisieren(verhandlungsFormular.status),
-  firma: verhandlungsFormular.firma.trim(),
+      ...verhandlungsFormular,
+      status,
+      firma: verhandlungsFormular.firma.trim(),
       auftraggeberName: verhandlungsFormular.auftraggeberName.trim(),
       verhandlungsgegenstand:
         verhandlungsFormular.verhandlungsgegenstand.trim(),
@@ -736,21 +930,40 @@ eintrag.status !== "Verloren"
       aktuellesAngebot: euroWert(verhandlungsFormular.aktuellesAngebot),
       zielpreis: euroWert(verhandlungsFormular.zielpreis),
       schmerzgrenze: euroWert(verhandlungsFormular.schmerzgrenze),
+      liefertermin:
+        verhandlungsFormular.lieferterminArt === "datum"
+          ? verhandlungsFormular.lieferterminDatum
+          : "",
       geaendertAm: serverTimestamp(),
     };
 
+    if (istBeendet) {
+      daten.abgeschlossenAm = bisherigerEintrag?.abgeschlossenAm || serverTimestamp();
+      daten.dokumentLoeschdatum = Timestamp.fromDate(dokumentLoeschdatum);
+    } else if (verhandlungsBearbeitungsId) {
+      daten.abgeschlossenAm = deleteField();
+      daten.dokumentLoeschdatum = deleteField();
+    }
+
     try {
+      let gespeicherteId = verhandlungsBearbeitungsId;
       if (verhandlungsBearbeitungsId) {
         await updateDoc(
           doc(db, "verhandlungen", verhandlungsBearbeitungsId),
           daten
         );
       } else {
-        await addDoc(collection(db, "verhandlungen"), {
+        const ref = await addDoc(collection(db, "verhandlungen"), {
           ...daten,
           erstelltAm: serverTimestamp(),
         });
+        gespeicherteId = ref.id;
       }
+
+      await dokumentFristenSynchronisieren(
+        gespeicherteId,
+        dokumentLoeschdatum
+      );
 
       setVerhandlungsDialogOffen(false);
       setVerhandlungsFormular(leerVerhandlungsFormular);
@@ -843,6 +1056,7 @@ eintrag.status !== "Verloren"
       return;
 
     try {
+      await alleDokumenteLoeschen("verhandlung", eintrag.id);
       await deleteDoc(doc(db, "verhandlungen", eintrag.id));
     } catch (error) {
       console.error(error);
@@ -952,6 +1166,8 @@ eintrag.status !== "Verloren"
     setFahrzeugFormular({
       ...leerFahrzeugFormular,
       ...eintrag,
+      ...lieferterminFormularwerte(eintrag, "gewuenschterLiefertermin"),
+      ...lieferterminFormularwerte(eintrag, "voraussichtlicherLiefertermin"),
       fahrzeuge: (eintrag.fahrzeuge || []).length
         ? eintrag.fahrzeuge.map((fahrzeug) => ({
             ...neuesFahrzeug(),
@@ -1047,6 +1263,14 @@ eintrag.status !== "Verloren"
       leasingrate: euroWert(fahrzeugFormular.leasingrate),
       kaufpreis: euroWert(fahrzeugFormular.kaufpreis),
       sonderzahlung: euroWert(fahrzeugFormular.sonderzahlung),
+      gewuenschterLiefertermin:
+        fahrzeugFormular.gewuenschterLieferterminArt === "datum"
+          ? fahrzeugFormular.gewuenschterLieferterminDatum
+          : "",
+      voraussichtlicherLiefertermin:
+        fahrzeugFormular.voraussichtlicherLieferterminArt === "datum"
+          ? fahrzeugFormular.voraussichtlicherLieferterminDatum
+          : "",
       userId: benutzer.uid,
       geaendertAm: serverTimestamp(),
     };
@@ -1129,11 +1353,12 @@ eintrag.status !== "Verloren"
         <td>${htmlSicher(eintrag.status)}<br><small>${htmlSicher(eintrag.verhandlungstag ? datumFormat(eintrag.verhandlungstag) : "Kein Verhandlungstag")}</small></td>
         <td><small>Für: ${htmlSicher(eintrag.auftraggeberName || "—")}</small><br><strong>${htmlSicher(eintrag.firma)}</strong><br>${htmlSicher(eintrag.verhandlungsgegenstand || "Kein Gegenstand hinterlegt")}</td>
         <td><strong>${htmlSicher(eintrag.ansprechpartner || "—")}</strong><br><small>${htmlSicher(eintrag.telefon || "Keine Telefonnummer")}<br>${htmlSicher(eintrag.email || "Keine E-Mail")}</small></td>
+        <td>${htmlSicher(lieferterminAnzeige(eintrag))}</td>
         <td>${htmlSicher(eintrag.wiedervorlage ? datumFormat(eintrag.wiedervorlage) : "—")}</td>
         <td>${htmlSicher(euroFormat(eintrag.aktuellesAngebot))}<br><small>Ersparnis: ${htmlSicher(euroFormat(einsparung(eintrag)))} (${htmlSicher(prozentFormat(einsparungProzent(eintrag)))})</small></td>
         <td>${htmlSicher(eintrag.notizen || "—")}</td>
       </tr>`).join("");
-    const druckHtml = `<!doctype html><html><head><meta charset="utf-8"><title>Urlaubsübergabe Verhandlungen</title><style>body{font-family:Arial,sans-serif;color:#172033;margin:28px}h1{margin:0 0 6px}.meta{color:#667085;margin-bottom:22px}table{width:100%;border-collapse:collapse;font-size:11px}th,td{border:1px solid #d0d5dd;padding:8px;vertical-align:top;text-align:left}th{background:#f2f4f7}tr{page-break-inside:avoid}@page{size:landscape;margin:10mm}@media print{body{margin:0}}</style></head><body><h1>Urlaubsübergabe – Verhandlungen</h1><div class="meta">Erstellt am ${new Date().toLocaleString("de-DE")} · ${auswahl.length} ausgewählte Verhandlung(en)</div><table><thead><tr><th>Status</th><th>Firma / Gegenstand</th><th>Ansprechpartner / Kontakt</th><th>Wiedervorlage</th><th>Aktueller Stand</th><th>Notizen</th></tr></thead><tbody>${zeilen}</tbody></table></body></html>`;
+    const druckHtml = `<!doctype html><html><head><meta charset="utf-8"><title>Urlaubsübergabe Verhandlungen</title><style>body{font-family:Arial,sans-serif;color:#172033;margin:28px}h1{margin:0 0 6px}.meta{color:#667085;margin-bottom:22px}table{width:100%;border-collapse:collapse;font-size:11px}th,td{border:1px solid #d0d5dd;padding:8px;vertical-align:top;text-align:left}th{background:#f2f4f7}tr{page-break-inside:avoid}@page{size:landscape;margin:10mm}@media print{body{margin:0}}</style></head><body><h1>Urlaubsübergabe – Verhandlungen</h1><div class="meta">Erstellt am ${new Date().toLocaleString("de-DE")} · ${auswahl.length} ausgewählte Verhandlung(en)</div><table><thead><tr><th>Status</th><th>Firma / Gegenstand</th><th>Ansprechpartner / Kontakt</th><th>Liefertermin</th><th>Wiedervorlage</th><th>Aktueller Stand</th><th>Notizen</th></tr></thead><tbody>${zeilen}</tbody></table></body></html>`;
 
     // Drucken über ein unsichtbares iFrame statt über window.open().
     // Dadurch wird kein Pop-up geöffnet und Chrome blockiert den PDF-Druck nicht.
@@ -1348,15 +1573,15 @@ eintrag.status !== "Verloren"
                     <Chip size="small" label={eintrag.beschaffungsart || "—"} color="primary" variant="outlined" />
                     <Chip size="small" label={eintrag.status || "Offen"} color={statusFarbe(eintrag.status)} />
                     <Typography variant="body2" sx={{ minWidth: 180 }}>
-                      Erwartet: {eintrag.voraussichtlicherLiefertermin ? datumFormat(eintrag.voraussichtlicherLiefertermin) : "nicht bekannt"}
+                      Erwartet: {lieferterminAnzeige(eintrag, "voraussichtlicherLiefertermin") === "—" ? "nicht bekannt" : lieferterminAnzeige(eintrag, "voraussichtlicherLiefertermin")}
                     </Typography>
                   </Stack>
                 </AccordionSummary>
                 <AccordionDetails>
                   <Grid container spacing={2}>
                     <Grid size={{ xs: 12, md: 3 }}><Typography variant="caption" color="text.secondary">Bestelltermin</Typography><Typography fontWeight={700}>{eintrag.bestelltermin ? datumFormat(eintrag.bestelltermin) : "—"}</Typography></Grid>
-                    <Grid size={{ xs: 12, md: 3 }}><Typography variant="caption" color="text.secondary">Gewünschter Liefertermin</Typography><Typography fontWeight={700}>{eintrag.gewuenschterLiefertermin ? datumFormat(eintrag.gewuenschterLiefertermin) : "—"}</Typography></Grid>
-                    <Grid size={{ xs: 12, md: 3 }}><Typography variant="caption" color="text.secondary">Voraussichtlicher Liefertermin</Typography><Typography fontWeight={700}>{eintrag.voraussichtlicherLiefertermin ? datumFormat(eintrag.voraussichtlicherLiefertermin) : "—"}</Typography></Grid>
+                    <Grid size={{ xs: 12, md: 3 }}><Typography variant="caption" color="text.secondary">Gewünschter Liefertermin</Typography><Typography fontWeight={700}>{lieferterminAnzeige(eintrag, "gewuenschterLiefertermin")}</Typography></Grid>
+                    <Grid size={{ xs: 12, md: 3 }}><Typography variant="caption" color="text.secondary">Voraussichtlicher Liefertermin</Typography><Typography fontWeight={700}>{lieferterminAnzeige(eintrag, "voraussichtlicherLiefertermin")}</Typography></Grid>
                     <Grid size={{ xs: 12, md: 3 }}><Typography variant="caption" color="text.secondary">Ansprechpartner</Typography><Typography fontWeight={700}>{eintrag.ansprechpartner || "—"}</Typography></Grid>
                   </Grid>
                   <Divider sx={{ my: 2 }} />
@@ -1606,6 +1831,14 @@ eintrag.status !== "Verloren"
                       </Grid>
                       <Grid size={{ xs: 6 }}>
                         <Typography variant="caption" color="text.secondary">
+                          Liefertermin
+                        </Typography>
+                        <Typography fontWeight={700}>
+                          {lieferterminAnzeige(eintrag)}
+                        </Typography>
+                      </Grid>
+                      <Grid size={{ xs: 6 }}>
+                        <Typography variant="caption" color="text.secondary">
                           Wiedervorlage
                         </Typography>
                         <Typography fontWeight={700}>
@@ -1654,6 +1887,7 @@ eintrag.status !== "Verloren"
                     <TableCell align="right">Ausgang</TableCell>
                     <TableCell align="right">Aktuell</TableCell>
                     <TableCell align="right">Einsparung</TableCell>
+                    <TableCell>Liefertermin</TableCell>
                     <TableCell>Wiedervorlage</TableCell>
                     <TableCell align="right">Aktionen</TableCell>
                   </TableRow>
@@ -1712,6 +1946,9 @@ eintrag.status !== "Verloren"
                         <Typography variant="caption" color="success.main" fontWeight={700}>
                           {prozentFormat(einsparungProzent(eintrag))}
                         </Typography>
+                      </TableCell>
+                      <TableCell>
+                        {lieferterminAnzeige(eintrag)}
                       </TableCell>
                       <TableCell>
                         {datumFormat(eintrag.wiedervorlage)}
@@ -2278,6 +2515,12 @@ eintrag.status !== "Verloren"
                 Ersparnis in Prozent berechnen und Zielpreise vergleichen
               </Button>
             </Grid>
+            <LieferterminEingabe
+              formular={verhandlungsFormular}
+              praefix="liefertermin"
+              label="Liefertermin"
+              onChange={verhandlungsFeldAendern}
+            />
             <Grid size={{ xs: 12, md: 6 }}>
               <TextField
                 fullWidth
@@ -2299,6 +2542,38 @@ eintrag.status !== "Verloren"
                 value={verhandlungsFormular.notizen}
                 onChange={verhandlungsFeldAendern}
               />
+            </Grid>
+            <Grid size={{ xs: 12 }}>
+              {verhandlungsBearbeitungsId ? (
+                <Accordion defaultExpanded={false} disableGutters>
+                  <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                    <Box>
+                      <Typography fontWeight={850}>Dokumente der Verhandlung</Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        Angebote, Vereinbarungen und weitere Dateien direkt zuordnen
+                      </Typography>
+                    </Box>
+                  </AccordionSummary>
+                  <AccordionDetails>
+                    <Dokumentablage
+                      ownerType="verhandlung"
+                      ownerId={verhandlungsBearbeitungsId}
+                      ownerLabel={verhandlungsFormular.firma}
+                      categories={VERHANDLUNG_DOKUMENT_KATEGORIEN}
+                      deleteAfter={
+                        verhandlungen.find(
+                          (eintrag) => eintrag.id === verhandlungsBearbeitungsId
+                        )?.dokumentLoeschdatum
+                      }
+                      compact
+                    />
+                  </AccordionDetails>
+                </Accordion>
+              ) : (
+                <Alert severity="info">
+                  Die Dokumentablage ist nach dem ersten Speichern der Verhandlung verfügbar.
+                </Alert>
+              )}
             </Grid>
           </Grid>
         </DialogContent>
@@ -2694,10 +2969,20 @@ eintrag.status !== "Verloren"
             <Grid size={{ xs: 12, md: 6 }}><TextField fullWidth label="Verhandlungsgegenstand" placeholder="z. B. Ersatzbeschaffung Werkstattfahrzeuge" name="beschreibung" value={fahrzeugFormular.beschreibung} onChange={fahrzeugFeldAendern} /></Grid>
             <Grid size={{ xs: 6, md: 3 }}><TextField select fullWidth label="Beschaffungsart" name="beschaffungsart" value={fahrzeugFormular.beschaffungsart} onChange={fahrzeugFeldAendern}><MenuItem value="Leasing">Leasing</MenuItem><MenuItem value="Kauf">Kauf</MenuItem></TextField></Grid>
             <Grid size={{ xs: 6, md: 3 }}><TextField select fullWidth label="Status" name="status" value={fahrzeugFormular.status} onChange={fahrzeugFeldAendern}>{["Offen", "In Verhandlung", "Bestellt", "Geliefert", "Abgebrochen"].map((wert) => <MenuItem key={wert} value={wert}>{wert}</MenuItem>)}</TextField></Grid>
-            <Grid size={{ xs: 12, md: 3 }}><TextField fullWidth type="date" label="Bestelltermin" name="bestelltermin" value={fahrzeugFormular.bestelltermin} onChange={fahrzeugFeldAendern} slotProps={{ inputLabel: { shrink: true } }} /></Grid>
-            <Grid size={{ xs: 12, md: 3 }}><TextField fullWidth type="date" label="Gewünschter Liefertermin" name="gewuenschterLiefertermin" value={fahrzeugFormular.gewuenschterLiefertermin} onChange={fahrzeugFeldAendern} slotProps={{ inputLabel: { shrink: true } }} /></Grid>
-            <Grid size={{ xs: 12, md: 3 }}><TextField fullWidth type="date" label="Voraussichtlicher Liefertermin" name="voraussichtlicherLiefertermin" value={fahrzeugFormular.voraussichtlicherLiefertermin} onChange={fahrzeugFeldAendern} slotProps={{ inputLabel: { shrink: true } }} /></Grid>
-            <Grid size={{ xs: 12, md: 3 }}><TextField fullWidth type="date" label="Wiedervorlage" name="wiedervorlage" value={fahrzeugFormular.wiedervorlage} onChange={fahrzeugFeldAendern} slotProps={{ inputLabel: { shrink: true } }} /></Grid>
+            <Grid size={{ xs: 12, md: 6 }}><TextField fullWidth type="date" label="Bestelltermin" name="bestelltermin" value={fahrzeugFormular.bestelltermin} onChange={fahrzeugFeldAendern} slotProps={{ inputLabel: { shrink: true } }} /></Grid>
+            <Grid size={{ xs: 12, md: 6 }}><TextField fullWidth type="date" label="Wiedervorlage" name="wiedervorlage" value={fahrzeugFormular.wiedervorlage} onChange={fahrzeugFeldAendern} slotProps={{ inputLabel: { shrink: true } }} /></Grid>
+            <LieferterminEingabe
+              formular={fahrzeugFormular}
+              praefix="gewuenschterLiefertermin"
+              label="Gewünschter Liefertermin"
+              onChange={fahrzeugFeldAendern}
+            />
+            <LieferterminEingabe
+              formular={fahrzeugFormular}
+              praefix="voraussichtlicherLiefertermin"
+              label="Voraussichtlicher Liefertermin"
+              onChange={fahrzeugFeldAendern}
+            />
             <Grid size={{ xs: 12, md: 4 }}><TextField fullWidth label="Ansprechpartner" name="ansprechpartner" value={fahrzeugFormular.ansprechpartner} onChange={fahrzeugFeldAendern} /></Grid>
             <Grid size={{ xs: 12, md: 4 }}><TextField fullWidth label="Telefon" name="telefon" value={fahrzeugFormular.telefon} onChange={fahrzeugFeldAendern} /></Grid>
             <Grid size={{ xs: 12, md: 4 }}><TextField fullWidth label="E-Mail" name="email" value={fahrzeugFormular.email} onChange={fahrzeugFeldAendern} /></Grid>
