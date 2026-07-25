@@ -1,27 +1,35 @@
-Sven Business Suite 5.3 – Prüfergebnis
+Sven Business Suite 5.4.0 – Prüfergebnis
 ======================================
 
-1. JavaScript-/JSX-Syntaxprüfung
+1. TypeScript-/JSX-Parserprüfung
    Ergebnis: ERFOLGREICH
-   Umfang: 14 Dateien unter src/
+   Umfang: 14 JavaScript-/JSX-Dateien unter src/
 
-2. Funktionsprüfungen im Quellcode
-   - Aufgaben einzeln ausklappbar: vorhanden
+2. Aufgaben-Datumsgruppen
+   - Gruppierung nach gleichem Fälligkeitsdatum: vorhanden
+   - Ausgeschriebener Wochentag und vollständiges Datum: vorhanden
+   - Datumsgruppen einzeln ausklappbar: vorhanden
+   - Aufgaben ohne Termin als eigene Gruppe: vorhanden
+   - Einzelne Aufgaben zusätzlich ausklappbar: vorhanden
+   Ergebnis: ERFOLGREICH
+
+3. Kategorie „Allgemein“
+   - Doppelte Anzeige wird in der Oberfläche entfernt: vorhanden
+   - Vorhandene doppelte Firestore-Kategorien werden zusammengeführt: vorhanden
+   Ergebnis: ERFOLGREICH
+
+4. Bestehende Anforderungen
    - Notizvorschau mit Zeilenumbrüchen: vorhanden
    - Mobile Umbruchregeln ohne seitliches Scrollen: vorhanden
-   - Fälligkeitsdatum mit Wochentag: vorhanden
-   - Breite PC-Verhandlungstabelle ohne horizontalen Regler: vorhanden
+   - Breite PC-Verhandlungsübersicht ohne horizontalen Regler: vorhanden
    Ergebnis: ERFOLGREICH
 
-3. npm-Abhängigkeiten
+5. npm-Abhängigkeiten
    Befehl: npm ci
-   Ergebnis: NICHT AUSFÜHRBAR
-   Ursache: HTTP 503 des in der Laufzeit bereitgestellten npm-Paketdienstes.
+   Ergebnis: NICHT VOLLSTÄNDIG AUSFÜHRBAR
+   Ursache: HTTP 503 des bereitgestellten npm-Paketdienstes.
 
-4. npm run lint
-   Ergebnis: NICHT AUSGEFÜHRT, da die Abhängigkeiten wegen HTTP 503 nicht installiert werden konnten.
+6. npm run lint / npm run build
+   Ergebnis: NICHT VOLLSTÄNDIG AUSGEFÜHRT, da die Abhängigkeiten nicht vollständig installiert werden konnten.
 
-5. npm run build
-   Ergebnis: NICHT AUSGEFÜHRT, da die Abhängigkeiten wegen HTTP 503 nicht installiert werden konnten.
-
-Hinweis: Der GitHub-Workflow .github/workflows/deploy.yml führt npm ci und npm run check automatisch aus.
+Hinweis: .github/workflows/deploy.yml führt npm ci und npm run check nach dem Hochladen automatisch aus.

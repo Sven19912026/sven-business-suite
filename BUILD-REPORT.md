@@ -1,33 +1,34 @@
-# Sven Business Suite 5.3 – Build- und Änderungsbericht
+# Sven Business Suite 5.4.0 – Build- und Änderungsbericht
 
 ## Umgesetzt
 
-### Aufgaben
+### Aufgaben und Kategorien
 
-- Jede Aufgabe ist einzeln ein- und ausklappbar.
-- Die eingeklappte Karte zeigt eine kompakte Notizvorschau.
-- Zeilenumbrüche in Notizen und Beschreibungen bleiben erhalten.
-- Lange Texte und Chips umbrechen mobil innerhalb der Karte, ohne seitliches Scrollen.
-- Fälligkeitsdaten werden einschließlich Wochentag angezeigt.
-- Bearbeiten und Löschen befinden sich übersichtlich im ausgeklappten Aufgabenbereich.
+- Die Kategorie „Allgemein“ wird pro Bereich nur einmal angezeigt.
+- Vorhandene doppelte „Allgemein“-Kategorien werden automatisch bereinigt; zugeordnete Aufgaben werden vorher auf die feste Standardkategorie verschoben.
+- Aufgaben desselben Fälligkeitstags werden innerhalb ihrer Prioritätsgruppe gemeinsam dargestellt.
+- Der Gruppenkopf enthält ausgeschriebenen Wochentag und vollständiges Datum.
+- Jeder Fälligkeitstag ist separat ein- und ausklappbar.
+- Der Zustand der Datumsgruppen wird benutzerbezogen im lokalen Speicher erhalten.
+- Aufgaben ohne Termin werden in einem eigenen Block zusammengefasst.
+- Einzelne Aufgaben bleiben weiterhin separat ausklappbar.
+- Notizvorschau mit Zeilenumbrüchen und mobile Darstellung ohne seitliches Scrollen bleiben enthalten.
+- Die manuelle Sortierung ist auf Aufgaben derselben Priorität und desselben Fälligkeitstags begrenzt, damit die Datumsgruppen konsistent bleiben.
 
 ### Verhandlungsübersicht
 
-- Die Verhandlungsseite nutzt am PC die gesamte verfügbare Inhaltsbreite.
-- Die Tabelle verwendet ein festes, kompaktes Spaltenlayout.
-- Die bisherige horizontale Scrollleiste der PC-Tabelle wird vermieden.
-- Kleine Bildschirme und kleinere Laptops verwenden weiterhin die übersichtliche Kartenansicht.
+- Die breite PC-Darstellung und das feste Tabellenlayout aus Version 5.3 bleiben vollständig enthalten.
 
 ### Version
 
-- Anwendung, Seitentitel, Metadaten und GitHub-Workflow wurden auf Version 5.3 aktualisiert.
+- Anwendung, Seitentitel, Metadaten und GitHub-Workflow wurden auf Version 5.4.0 aktualisiert.
 
-## Lokale Prüfung in dieser Umgebung
+## Prüfung in dieser Umgebung
 
-- JavaScript-/JSX-Syntaxprüfung aller 14 Quelldateien: erfolgreich.
-- Automatisierte Quellcode-Prüfung der angeforderten Funktionen: erfolgreich.
-- `npm ci`: nicht möglich, weil der in dieser Laufzeit bereitgestellte npm-Paketdienst wiederholt mit HTTP 503 geantwortet hat.
-- Deshalb konnten `npm run lint` und `npm run build` in dieser Laufzeit nicht ehrlich als erfolgreich bestätigt werden.
-- Der veraltete Build-Ordner aus Version 5.2 wurde bewusst entfernt, damit keine alten Dateien als Version 5.3 ausgeliefert werden.
+- TypeScript-/JSX-Parserprüfung aller 14 Dateien unter `src/`: erfolgreich.
+- Quellcodeprüfungen für Datumsgruppierung, einzelne Ausklappbarkeit, mobile Umbruchregeln und Kategorie-Deduplizierung: erfolgreich.
+- `npm ci`: nicht vollständig möglich, weil der bereitgestellte npm-Paketdienst beim Abruf einer Abhängigkeit mit HTTP 503 geantwortet hat.
+- Deshalb konnten `npm run lint` und `npm run build` in dieser Laufzeit nicht vollständig ausgeführt werden.
+- Unvollständige `node_modules`-Dateien und alte `dist`-Artefakte werden nicht in die ZIP aufgenommen.
 
-Der vorhandene GitHub-Workflow führt nach dem Hochladen automatisch `npm ci` und anschließend `npm run check` aus und erzeugt dabei den aktuellen `dist`-Ordner.
+Der vorhandene GitHub-Workflow führt nach dem Hochladen automatisch `npm ci` und anschließend `npm run check` aus.

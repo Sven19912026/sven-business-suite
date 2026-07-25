@@ -1,5 +1,5 @@
 // UPDATE: Einklappbare Prioritätsgruppen und manuelle Drag-and-Drop-Sortierung
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Alert,
   Box,
@@ -86,6 +86,14 @@ function datumFormatieren(value) {
     : datum.toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric' })
 }
 
+function datumsGruppeFormatieren(value) {
+  if (!value) return 'Ohne Fälligkeitsdatum'
+  const datum = new Date(`${value}T00:00:00`)
+  return Number.isNaN(datum.getTime())
+    ? value
+    : datum.toLocaleDateString('de-DE', { weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric' })
+}
+
 function zeitstempelFormatieren(value) {
   if (!value) return 'Zeitpunkt nicht verfügbar'
   const datum = typeof value?.toDate === 'function'
@@ -133,6 +141,8 @@ export default function Aufgaben() {
   const user = auth.currentUser
   const [aufgaben, setAufgaben] = useState([])
   const [kategorien, setKategorien] = useState([])
+  const [aufgabenGeladen, setAufgabenGeladen] = useState(false)
+  const [kategorienGeladen, setKategorienGeladen] = useState(false)
   const [fehler, setFehler] = useState('')
   const [suche, setSuche] = useState('')
   const [filterKategorie, setFilterKategorie] = useState('Alle')
@@ -161,6 +171,20 @@ export default function Aufgaben() {
   const [speichert, setSpeichert] = useState(false)
   const [erledigteOffen, setErledigteOffen] = useState(true)
   const [offeneAufgaben, setOffeneAufgaben] = useState({})
+  const [offeneDatumsGruppen, setOffeneDatumsGruppen] = useState(() => {
+    const aktuelleUserId = auth.currentUser?.uid
+    if (!aktuelleUserId) return {}
+
+    try {
+      const gespeichert = JSON.parse(
+        localStorage.getItem(`sven-suite-aufgaben-datumsgruppen-${aktuelleUserId}`) || '{}',
+      )
+      return gespeichert && typeof gespeichert === 'object' ? gespeichert : {}
+    } catch (error) {
+      console.warn('Gespeicherter Datumsgruppen-Zustand konnte nicht gelesen werden.', error)
+      return {}
+    }
+  })
   const [offenePrioritaeten, setOffenePrioritaeten] = useState(() => {
     const aktuelleUserId = auth.currentUser?.uid
     if (!aktuelleUserId) return {}
@@ -183,6 +207,7 @@ export default function Aufgaben() {
   const [gezogeneAufgabeId, setGezogeneAufgabeId] = useState('')
   const [dragUeberAufgabeId, setDragUeberAufgabeId] = useState('')
   const [sortierungSpeichert, setSortierungSpeichert] = useState(false)
+  const laufendeKategorieBereinigungen = useRef(new Set())
 
   useEffect(() => {
     if (!user) return undefined
@@ -191,12 +216,18 @@ export default function Aufgaben() {
 
     const unsubAufgaben = onSnapshot(
       aufgabenQuery,
-      (snapshot) => setAufgaben(snapshot.docs.map((item) => ({ id: item.id, ...item.data() }))),
+      (snapshot) => {
+        setAufgaben(snapshot.docs.map((item) => ({ id: item.id, ...item.data() })))
+        setAufgabenGeladen(true)
+      },
       () => setFehler('Aufgaben konnten nicht geladen werden. Prüfe die Firestore-Regeln.'),
     )
     const unsubKategorien = onSnapshot(
       kategorienQuery,
-      (snapshot) => setKategorien(snapshot.docs.map((item) => ({ id: item.id, ...item.data() }))),
+      (snapshot) => {
+        setKategorien(snapshot.docs.map((item) => ({ id: item.id, ...item.data() })))
+        setKategorienGeladen(true)
+      },
       () => setFehler('Kategorien konnten nicht geladen werden. Prüfe die Firestore-Regeln.'),
     )
     return () => { unsubAufgaben(); unsubKategorien() }
@@ -226,19 +257,73 @@ export default function Aufgaben() {
     })
   }, [user])
 
+
+  useEffect(() => {
+    if (!user || !aufgabenGeladen || !kategorienGeladen) return
+
+    const allgemeinName = STANDARD_KATEGORIE.toLocaleLowerCase('de-DE')
+
+    ;['arbeit', 'privat'].forEach((zielBereich) => {
+      const standardId = `allgemein-${user.uid}-${zielBereich}`
+      const allgemeinKategorien = kategorien.filter((kategorie) => (
+        (kategorie.bereich || 'arbeit') === zielBereich
+        && String(kategorie.name || '').trim().toLocaleLowerCase('de-DE') === allgemeinName
+      ))
+      const standardKategorieVorhanden = allgemeinKategorien.some((kategorie) => kategorie.id === standardId)
+      const doppelteKategorien = allgemeinKategorien.filter((kategorie) => kategorie.id !== standardId)
+
+      if (!standardKategorieVorhanden || !doppelteKategorien.length) return
+
+      const doppelteIds = new Set(doppelteKategorien.map((kategorie) => kategorie.id))
+      const bereinigungsId = `${zielBereich}:${[...doppelteIds].sort().join(',')}`
+      if (laufendeKategorieBereinigungen.current.has(bereinigungsId)) return
+      laufendeKategorieBereinigungen.current.add(bereinigungsId)
+
+      const batch = writeBatch(db)
+      aufgaben
+        .filter((aufgabe) => doppelteIds.has(aufgabe.kategorieId))
+        .forEach((aufgabe) => batch.update(doc(db, 'suiteAufgaben', aufgabe.id), {
+          kategorieId: standardId,
+          aktualisiertAm: serverTimestamp(),
+        }))
+      doppelteKategorien.forEach((kategorie) => {
+        batch.delete(doc(db, 'aufgabenKategorien', kategorie.id))
+      })
+
+      batch.commit().catch((error) => {
+        laufendeKategorieBereinigungen.current.delete(bereinigungsId)
+        console.error(error)
+        setFehler('Die doppelte Kategorie „Allgemein“ konnte nicht automatisch bereinigt werden.')
+      })
+    })
+  }, [aufgaben, aufgabenGeladen, kategorien, kategorienGeladen, user])
+
   const bereichKategorien = useMemo(
     () => kategorien.filter((item) => (item.bereich || 'arbeit') === bereich),
     [kategorien, bereich],
   )
 
-  const sortierteKategorien = useMemo(
-    () => [...bereichKategorien].sort((a, b) => String(a.name).localeCompare(String(b.name), 'de')),
-    [bereichKategorien],
-  )
+  const sortierteKategorien = useMemo(() => {
+    const eindeutigeKategorien = new Map()
+    const standardId = `allgemein-${user?.uid}-${bereich}`
+
+    bereichKategorien.forEach((kategorie) => {
+      const schluessel = String(kategorie.name || '').trim().toLocaleLowerCase('de-DE')
+      const vorhanden = eindeutigeKategorien.get(schluessel)
+
+      if (!vorhanden || kategorie.id === standardId) {
+        eindeutigeKategorien.set(schluessel, kategorie)
+      }
+    })
+
+    return [...eindeutigeKategorien.values()]
+      .sort((a, b) => String(a.name).localeCompare(String(b.name), 'de'))
+  }, [bereichKategorien, bereich, user?.uid])
   const standardKategorie = bereichKategorien.find((item) => item.id === `allgemein-${user?.uid}-${bereich}`)
     || bereichKategorien.find((item) => String(item.name || '').trim().toLocaleLowerCase('de-DE') === STANDARD_KATEGORIE.toLocaleLowerCase('de-DE'))
   const heute = heuteIso()
   const offenePrioritaetenSchluessel = user ? `sven-suite-aufgaben-prioritaeten-${user.uid}` : ''
+  const offeneDatumsGruppenSchluessel = user ? `sven-suite-aufgaben-datumsgruppen-${user.uid}` : ''
   const manuelleSortierungSchluessel = user ? `sven-suite-aufgaben-manuell-${user.uid}` : ''
   const bereichSchluessel = user ? `sven-suite-aufgaben-bereich-${user.uid}` : ''
   const bereichName = bereich === 'privat' ? 'Privat' : 'Arbeit'
@@ -296,11 +381,33 @@ export default function Aufgaben() {
           return String(a.titel).localeCompare(String(b.titel), 'de')
         })
 
+      const datumsGruppenMap = new Map()
+      gruppenAufgaben.forEach((aufgabe) => {
+        const datum = aufgabe.faelligAm || ''
+        const schluessel = datum || 'ohne-faelligkeit'
+        if (!datumsGruppenMap.has(schluessel)) {
+          datumsGruppenMap.set(schluessel, {
+            id: `prioritaet-${prioritaet.toLowerCase()}-datum-${schluessel}`,
+            datum,
+            aufgaben: [],
+          })
+        }
+        datumsGruppenMap.get(schluessel).aufgaben.push(aufgabe)
+      })
+
+      const datumsGruppen = [...datumsGruppenMap.values()].sort((a, b) => {
+        if (!a.datum && !b.datum) return 0
+        if (!a.datum) return 1
+        if (!b.datum) return -1
+        return a.datum.localeCompare(b.datum)
+      })
+
       return {
         id: `prioritaet-${prioritaet.toLowerCase()}`,
         prioritaet,
         name: `Priorität ${prioritaet}`,
         aufgaben: gruppenAufgaben,
+        datumsGruppen,
       }
     })
     .filter((gruppe) => gruppe.aufgaben.length > 0), [gefilterteAufgaben, manuelleSortierung, sortierung])
@@ -329,6 +436,16 @@ export default function Aufgaben() {
       localStorage.setItem(offenePrioritaetenSchluessel, JSON.stringify(naechsterStand))
     }
     return naechsterStand
+  }
+
+  function datumsGruppeUmschalten(id) {
+    setOffeneDatumsGruppen((vorher) => {
+      const naechsterStand = { ...vorher, [id]: vorher[id] === false }
+      if (offeneDatumsGruppenSchluessel) {
+        localStorage.setItem(offeneDatumsGruppenSchluessel, JSON.stringify(naechsterStand))
+      }
+      return naechsterStand
+    })
   }
 
   function prioritaetUmschalten(id) {
@@ -381,7 +498,11 @@ export default function Aufgaben() {
   function dragUeber(event, zielAufgabe) {
     if (!manuelleSortierung || sortierungSpeichert) return
     const quelle = aufgaben.find((aufgabe) => aufgabe.id === gezogeneAufgabeId)
-    if (!quelle || (quelle.prioritaet || 'Mittel') !== (zielAufgabe.prioritaet || 'Mittel')) return
+    if (
+      !quelle
+      || (quelle.prioritaet || 'Mittel') !== (zielAufgabe.prioritaet || 'Mittel')
+      || (quelle.faelligAm || '') !== (zielAufgabe.faelligAm || '')
+    ) return
     event.preventDefault()
     event.dataTransfer.dropEffect = 'move'
     setDragUeberAufgabeId(zielAufgabe.id)
@@ -402,8 +523,11 @@ export default function Aufgaben() {
     }
 
     const prioritaet = quellAufgabe.prioritaet || 'Mittel'
-    if (prioritaet !== (zielAufgabe.prioritaet || 'Mittel')) {
-      setFehler('Aufgaben können nur innerhalb derselben Prioritätsgruppe verschoben werden.')
+    if (
+      prioritaet !== (zielAufgabe.prioritaet || 'Mittel')
+      || (quellAufgabe.faelligAm || '') !== (zielAufgabe.faelligAm || '')
+    ) {
+      setFehler('Aufgaben können nur innerhalb derselben Priorität und desselben Fälligkeitstags verschoben werden.')
       dragBeenden()
       return
     }
@@ -414,7 +538,9 @@ export default function Aufgaben() {
       return
     }
 
-    const sichtbareIds = sichtbareGruppe.aufgaben.map((aufgabe) => aufgabe.id)
+    const sichtbareIds = sichtbareGruppe.aufgaben
+      .filter((aufgabe) => (aufgabe.faelligAm || '') === (quellAufgabe.faelligAm || ''))
+      .map((aufgabe) => aufgabe.id)
     const quellIndex = sichtbareIds.indexOf(quellAufgabe.id)
     const zielIndex = sichtbareIds.indexOf(zielAufgabe.id)
     if (quellIndex < 0 || zielIndex < 0) {
@@ -428,6 +554,7 @@ export default function Aufgaben() {
 
     const vollstaendigeGruppe = [...bereichAufgaben]
       .filter((aufgabe) => (aufgabe.prioritaet || 'Mittel') === prioritaet)
+      .filter((aufgabe) => (aufgabe.faelligAm || '') === (quellAufgabe.faelligAm || ''))
       .sort((a, b) => {
         const aWert = Number.isFinite(Number(a.manuelleReihenfolge)) ? Number(a.manuelleReihenfolge) : Number.MAX_SAFE_INTEGER
         const bWert = Number.isFinite(Number(b.manuelleReihenfolge)) ? Number(b.manuelleReihenfolge) : Number.MAX_SAFE_INTEGER
@@ -599,7 +726,7 @@ export default function Aufgaben() {
       <Paper sx={{ p: { xs: 2.5, sm: 3 } }}>
         <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" gap={2}>
           <Box>
-            <Typography variant="overline" color="primary" fontWeight={800}>Business Suite 5.3</Typography>
+            <Typography variant="overline" color="primary" fontWeight={800}>Business Suite 5.4.0</Typography>
             <Typography variant="h4" fontWeight={800}>Aufgaben</Typography>
             <Typography color="text.secondary" mt={0.5}>Aufgaben für Arbeit und Privat getrennt planen, priorisieren und verwalten.</Typography>
           </Box>
@@ -653,7 +780,7 @@ export default function Aufgaben() {
           <TextField label="Suche" value={suche} onChange={(e) => setSuche(e.target.value)} fullWidth />
           <TextField select label="Kategorie" value={filterKategorie} onChange={(e) => setFilterKategorie(e.target.value)} sx={{ minWidth: 210 }}>
             <MenuItem value="Alle">Alle Kategorien</MenuItem>
-            {kategorien.filter((item) => (item.bereich || 'arbeit') === (aufgabeForm.bereich || bereich)).sort((a, b) => String(a.name).localeCompare(String(b.name), 'de')).map((item) => <MenuItem key={item.id} value={item.id}>{item.name}</MenuItem>)}
+            {sortierteKategorien.map((item) => <MenuItem key={item.id} value={item.id}>{item.name}</MenuItem>)}
           </TextField>
           <TextField select label="Status" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} sx={{ minWidth: 150 }}>
             {['Offen', 'Erledigt', 'Alle'].map((wert) => <MenuItem key={wert} value={wert}>{wert}</MenuItem>)}
@@ -688,7 +815,7 @@ export default function Aufgaben() {
             <Box>
               <Typography variant="h6" fontWeight={800}>Aufgaben nach Priorität</Typography>
               <Typography variant="body2" color="text.secondary">
-                Prioritätsgruppen anklicken, um sie ein- oder auszuklappen.
+                Prioritätsgruppen und Fälligkeitstage anklicken, um sie ein- oder auszuklappen.
               </Typography>
             </Box>
             {prioritaetsGruppen.length > 1 && (
@@ -701,7 +828,7 @@ export default function Aufgaben() {
 
           {manuelleSortierung && (
             <Alert severity="info">
-              Ziehe Aufgaben am Griff in die gewünschte Reihenfolge. Verschieben ist nur innerhalb derselben Prioritätsgruppe möglich.
+              Ziehe Aufgaben am Griff in die gewünschte Reihenfolge. Verschieben ist nur innerhalb derselben Priorität und desselben Fälligkeitstags möglich.
             </Alert>
           )}
 
@@ -761,145 +888,195 @@ export default function Aufgaben() {
 
                 <Collapse in={istOffen} timeout="auto" unmountOnExit>
                   <Stack spacing={1.25} sx={{ p: 1.5, pt: 1.25 }}>
-                    {gruppe.aufgaben.map((aufgabe) => {
-                      const ueberfaellig = !aufgabe.erledigt && aufgabe.faelligAm && aufgabe.faelligAm < heute
-                      const wirdGezogen = gezogeneAufgabeId === aufgabe.id
-                      const istDragZiel = dragUeberAufgabeId === aufgabe.id && !wirdGezogen
-                      const kategorie = kategorien.find((eintrag) => eintrag.id === aufgabe.kategorieId)
-                      const aufgabeIstOffen = offeneAufgaben[aufgabe.id] === true
-                      return (
-                        <Card
-                          key={aufgabe.id}
-                          variant="outlined"
-                          draggable={manuelleSortierung && !sortierungSpeichert}
-                          onDragStart={(event) => dragStarten(event, aufgabe)}
-                          onDragOver={(event) => dragUeber(event, aufgabe)}
-                          onDrop={(event) => aufgabeAblegen(event, aufgabe)}
-                          onDragEnd={dragBeenden}
-                          sx={{
-                            width: '100%',
-                            maxWidth: '100%',
-                            overflow: 'hidden',
-                            opacity: wirdGezogen ? 0.45 : (aufgabe.erledigt ? 0.65 : 1),
-                            borderColor: istDragZiel ? 'primary.main' : (ueberfaellig ? 'error.main' : 'divider'),
-                            borderWidth: istDragZiel ? 2 : 1,
-                            cursor: manuelleSortierung ? 'grab' : 'default',
-                            transition: 'border-color 120ms ease, opacity 120ms ease',
-                            '&:active': manuelleSortierung ? { cursor: 'grabbing' } : undefined,
-                          }}
-                        >
-                          <CardContent sx={{ p: { xs: 1.25, sm: 2 }, '&:last-child': { pb: { xs: 1.25, sm: 2 } } }}>
-                            <Stack direction="row" gap={{ xs: 0.5, sm: 1 }} alignItems="flex-start" sx={{ minWidth: 0 }}>
-                              {manuelleSortierung && (
-                                <Tooltip title="Zum Sortieren ziehen">
-                                  <Box
-                                    aria-label="Aufgabe verschieben"
-                                    sx={{
-                                      display: { xs: 'none', sm: 'grid' },
-                                      placeItems: 'center',
-                                      minWidth: 28,
-                                      minHeight: 40,
-                                      color: 'text.secondary',
-                                      cursor: 'grab',
-                                    }}
-                                  >
-                                    <DragIndicatorIcon />
-                                  </Box>
-                                </Tooltip>
-                              )}
-                              <Checkbox
-                                checked={aufgabe.erledigt === true}
-                                onChange={() => aufgabeStatusAendern(aufgabe)}
-                                sx={{ p: 0.5, flexShrink: 0 }}
-                              />
-                              <Box sx={{ flexGrow: 1, minWidth: 0, overflow: 'hidden' }}>
-                                <Typography
-                                  fontWeight={800}
-                                  sx={{
-                                    textDecoration: aufgabe.erledigt ? 'line-through' : 'none',
-                                    overflowWrap: 'anywhere',
-                                    wordBreak: 'break-word',
-                                  }}
-                                >
-                                  {aufgabe.titel}
-                                </Typography>
-                                {!aufgabeIstOffen && aufgabe.notizen && (
-                                  <Typography
-                                    variant="body2"
-                                    color="text.secondary"
-                                    sx={{
-                                      mt: 0.75,
-                                      whiteSpace: 'pre-wrap',
-                                      overflowWrap: 'anywhere',
-                                      wordBreak: 'break-word',
-                                      lineHeight: 1.45,
-                                      maxHeight: '4.35em',
-                                      overflow: 'hidden',
-                                    }}
-                                  >
-                                    <strong>Notiz:</strong>{' '}{aufgabe.notizen}
-                                  </Typography>
-                                )}
-                                <Stack direction="row" gap={0.75} flexWrap="wrap" mt={1.25} useFlexGap sx={{ minWidth: 0 }}>
-                                  <Chip size="small" color={prioritaetsFarbe(aufgabe.prioritaet)} label={aufgabe.prioritaet || 'Mittel'} />
-                                  <Chip size="small" variant="outlined" label={kategorie?.name || 'Ohne Kategorie'} sx={{ maxWidth: '100%', '& .MuiChip-label': { overflow: 'hidden', textOverflow: 'ellipsis' } }} />
-                                  <Chip
-                                    size="small"
-                                    color={ueberfaellig ? 'error' : 'default'}
-                                    variant={ueberfaellig ? 'filled' : 'outlined'}
-                                    label={ueberfaellig ? `Überfällig · ${datumFormatieren(aufgabe.faelligAm)}` : datumFormatieren(aufgabe.faelligAm)}
-                                    sx={{
-                                      maxWidth: '100%',
-                                      height: 'auto',
-                                      '& .MuiChip-label': { whiteSpace: 'normal', py: 0.35, overflowWrap: 'anywhere' },
-                                    }}
-                                  />
-                                </Stack>
-                              </Box>
-                              <Tooltip title={aufgabeIstOffen ? 'Aufgabe einklappen' : 'Aufgabe ausklappen'}>
-                                <IconButton
-                                  size="small"
-                                  onClick={() => aufgabeUmschalten(aufgabe.id)}
-                                  aria-expanded={aufgabeIstOffen}
-                                  aria-label={aufgabeIstOffen ? 'Aufgabe einklappen' : 'Aufgabe ausklappen'}
-                                  sx={{ flexShrink: 0 }}
-                                >
-                                  {aufgabeIstOffen ? <ExpandLessIcon /> : <ExpandMoreIcon />}
-                                </IconButton>
-                              </Tooltip>
-                            </Stack>
+                    {gruppe.datumsGruppen.map((datumsGruppe) => {
+                      const datumsGruppeIstOffen = offeneDatumsGruppen[datumsGruppe.id] !== false
+                      const gruppeIstHeute = datumsGruppe.datum === heute
+                      const gruppeIstUeberfaellig = Boolean(
+                        datumsGruppe.datum
+                        && datumsGruppe.datum < heute
+                        && datumsGruppe.aufgaben.some((aufgabe) => !aufgabe.erledigt),
+                      )
 
-                            <Collapse in={aufgabeIstOffen} timeout="auto" unmountOnExit>
-                              <Divider sx={{ my: 1.5 }} />
-                              <Stack spacing={1.25} sx={{ minWidth: 0 }}>
-                                {aufgabe.beschreibung && (
-                                  <Box>
-                                    <Typography variant="caption" color="text.secondary" fontWeight={700}>Beschreibung</Typography>
-                                    <Typography sx={{ mt: 0.25, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
-                                      {aufgabe.beschreibung}
-                                    </Typography>
-                                  </Box>
-                                )}
-                                {aufgabe.notizen && (
-                                  <Box>
-                                    <Typography variant="caption" color="text.secondary" fontWeight={700}>Notiz</Typography>
-                                    <Typography variant="body2" sx={{ mt: 0.25, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
-                                      {aufgabe.notizen}
-                                    </Typography>
-                                  </Box>
-                                )}
-                                <Stack direction="row" gap={0.75} flexWrap="wrap" useFlexGap>
-                                  {aufgabe.verantwortlich && <Chip size="small" variant="outlined" label={`Verantwortlich: ${aufgabe.verantwortlich}`} sx={{ maxWidth: '100%', height: 'auto', '& .MuiChip-label': { whiteSpace: 'normal', py: 0.35, overflowWrap: 'anywhere' } }} />}
-                                  {aufgabe.wiederholung && aufgabe.wiederholung !== 'Keine' && <Chip size="small" variant="outlined" label={`Wiederholung: ${aufgabe.wiederholung}`} sx={{ maxWidth: '100%', height: 'auto', '& .MuiChip-label': { whiteSpace: 'normal', py: 0.35, overflowWrap: 'anywhere' } }} />}
-                                </Stack>
-                                <Stack direction="row" justifyContent="flex-end" gap={1} flexWrap="wrap" useFlexGap>
-                                  <Button size="small" startIcon={<EditIcon />} onClick={() => aufgabeBearbeiten(aufgabe)}>Bearbeiten</Button>
-                                  <Button size="small" color="error" startIcon={<DeleteIcon />} onClick={() => aufgabeLoeschen(aufgabe)}>Löschen</Button>
-                                </Stack>
+                      return (
+                        <Paper key={datumsGruppe.id} variant="outlined" sx={{ overflow: 'hidden', minWidth: 0 }}>
+                          <Stack
+                            direction="row"
+                            alignItems="flex-start"
+                            gap={0.75}
+                            role="button"
+                            tabIndex={0}
+                            aria-expanded={datumsGruppeIstOffen}
+                            onClick={() => datumsGruppeUmschalten(datumsGruppe.id)}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter' || event.key === ' ') {
+                                event.preventDefault()
+                                datumsGruppeUmschalten(datumsGruppe.id)
+                              }
+                            }}
+                            sx={{
+                              px: { xs: 1, sm: 1.5 },
+                              py: 1.25,
+                              minWidth: 0,
+                              cursor: 'pointer',
+                              bgcolor: gruppeIstUeberfaellig ? 'rgba(211, 47, 47, 0.06)' : (gruppeIstHeute ? 'rgba(237, 108, 2, 0.07)' : 'background.default'),
+                              '&:hover': { bgcolor: 'action.hover' },
+                            }}
+                          >
+                            <IconButton size="small" tabIndex={-1} aria-label={datumsGruppeIstOffen ? 'Fälligkeitstag schließen' : 'Fälligkeitstag öffnen'} sx={{ flexShrink: 0 }}>
+                              {datumsGruppeIstOffen ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+                            </IconButton>
+                            <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+                              <Typography fontWeight={850} sx={{ textTransform: 'capitalize', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
+                                {datumsGruppeFormatieren(datumsGruppe.datum)}
+                              </Typography>
+                              <Stack direction="row" gap={0.75} alignItems="center" flexWrap="wrap" useFlexGap mt={0.5}>
+                                <Typography variant="body2" color="text.secondary">
+                                  {datumsGruppe.aufgaben.length} Aufgabe{datumsGruppe.aufgaben.length === 1 ? '' : 'n'} an diesem Tag
+                                </Typography>
+                                {gruppeIstHeute && <Chip size="small" color="warning" label="Heute" />}
+                                {gruppeIstUeberfaellig && <Chip size="small" color="error" label="Überfällig" />}
+                                <Chip size="small" label={datumsGruppe.aufgaben.length} color={datumsGruppeIstOffen ? 'primary' : 'default'} />
                               </Stack>
-                            </Collapse>
-                          </CardContent>
-                        </Card>
+                            </Box>
+                          </Stack>
+
+                          <Collapse in={datumsGruppeIstOffen} timeout="auto" unmountOnExit>
+                            <Stack spacing={1.25} sx={{ p: { xs: 1, sm: 1.25 }, pt: 1.25 }}>
+                              {datumsGruppe.aufgaben.map((aufgabe) => {
+                                const ueberfaellig = !aufgabe.erledigt && aufgabe.faelligAm && aufgabe.faelligAm < heute
+                                const wirdGezogen = gezogeneAufgabeId === aufgabe.id
+                                const istDragZiel = dragUeberAufgabeId === aufgabe.id && !wirdGezogen
+                                const kategorie = kategorien.find((eintrag) => eintrag.id === aufgabe.kategorieId)
+                                const aufgabeIstOffen = offeneAufgaben[aufgabe.id] === true
+                                return (
+                                  <Card
+                                    key={aufgabe.id}
+                                    variant="outlined"
+                                    draggable={manuelleSortierung && !sortierungSpeichert}
+                                    onDragStart={(event) => dragStarten(event, aufgabe)}
+                                    onDragOver={(event) => dragUeber(event, aufgabe)}
+                                    onDrop={(event) => aufgabeAblegen(event, aufgabe)}
+                                    onDragEnd={dragBeenden}
+                                    sx={{
+                                      width: '100%',
+                                      maxWidth: '100%',
+                                      overflow: 'hidden',
+                                      opacity: wirdGezogen ? 0.45 : (aufgabe.erledigt ? 0.65 : 1),
+                                      borderColor: istDragZiel ? 'primary.main' : (ueberfaellig ? 'error.main' : 'divider'),
+                                      borderWidth: istDragZiel ? 2 : 1,
+                                      cursor: manuelleSortierung ? 'grab' : 'default',
+                                      transition: 'border-color 120ms ease, opacity 120ms ease',
+                                      '&:active': manuelleSortierung ? { cursor: 'grabbing' } : undefined,
+                                    }}
+                                  >
+                                    <CardContent sx={{ p: { xs: 1.25, sm: 2 }, '&:last-child': { pb: { xs: 1.25, sm: 2 } } }}>
+                                      <Stack direction="row" gap={{ xs: 0.5, sm: 1 }} alignItems="flex-start" sx={{ minWidth: 0 }}>
+                                        {manuelleSortierung && (
+                                          <Tooltip title="Zum Sortieren ziehen">
+                                            <Box
+                                              aria-label="Aufgabe verschieben"
+                                              sx={{
+                                                display: { xs: 'none', sm: 'grid' },
+                                                placeItems: 'center',
+                                                minWidth: 28,
+                                                minHeight: 40,
+                                                color: 'text.secondary',
+                                                cursor: 'grab',
+                                              }}
+                                            >
+                                              <DragIndicatorIcon />
+                                            </Box>
+                                          </Tooltip>
+                                        )}
+                                        <Checkbox
+                                          checked={aufgabe.erledigt === true}
+                                          onChange={() => aufgabeStatusAendern(aufgabe)}
+                                          sx={{ p: 0.5, flexShrink: 0 }}
+                                        />
+                                        <Box sx={{ flexGrow: 1, minWidth: 0, overflow: 'hidden' }}>
+                                          <Typography
+                                            fontWeight={800}
+                                            sx={{
+                                              textDecoration: aufgabe.erledigt ? 'line-through' : 'none',
+                                              overflowWrap: 'anywhere',
+                                              wordBreak: 'break-word',
+                                            }}
+                                          >
+                                            {aufgabe.titel}
+                                          </Typography>
+                                          {!aufgabeIstOffen && aufgabe.notizen && (
+                                            <Typography
+                                              variant="body2"
+                                              color="text.secondary"
+                                              sx={{
+                                                mt: 0.75,
+                                                whiteSpace: 'pre-wrap',
+                                                overflowWrap: 'anywhere',
+                                                wordBreak: 'break-word',
+                                                lineHeight: 1.45,
+                                                maxHeight: '4.35em',
+                                                overflow: 'hidden',
+                                              }}
+                                            >
+                                              <strong>Notiz:</strong>{' '}{aufgabe.notizen}
+                                            </Typography>
+                                          )}
+                                          <Stack direction="row" gap={0.75} flexWrap="wrap" mt={1.25} useFlexGap sx={{ minWidth: 0 }}>
+                                            <Chip size="small" color={prioritaetsFarbe(aufgabe.prioritaet)} label={aufgabe.prioritaet || 'Mittel'} />
+                                            <Chip size="small" variant="outlined" label={kategorie?.name || 'Ohne Kategorie'} sx={{ maxWidth: '100%', '& .MuiChip-label': { overflow: 'hidden', textOverflow: 'ellipsis' } }} />
+                                            {ueberfaellig && <Chip size="small" color="error" label="Überfällig" />}
+                                          </Stack>
+                                        </Box>
+                                        <Tooltip title={aufgabeIstOffen ? 'Aufgabe einklappen' : 'Aufgabe ausklappen'}>
+                                          <IconButton
+                                            size="small"
+                                            onClick={() => aufgabeUmschalten(aufgabe.id)}
+                                            aria-expanded={aufgabeIstOffen}
+                                            aria-label={aufgabeIstOffen ? 'Aufgabe einklappen' : 'Aufgabe ausklappen'}
+                                            sx={{ flexShrink: 0 }}
+                                          >
+                                            {aufgabeIstOffen ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+                                          </IconButton>
+                                        </Tooltip>
+                                      </Stack>
+
+                                      <Collapse in={aufgabeIstOffen} timeout="auto" unmountOnExit>
+                                        <Divider sx={{ my: 1.5 }} />
+                                        <Stack spacing={1.25} sx={{ minWidth: 0 }}>
+                                          {aufgabe.beschreibung && (
+                                            <Box>
+                                              <Typography variant="caption" color="text.secondary" fontWeight={700}>Beschreibung</Typography>
+                                              <Typography sx={{ mt: 0.25, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
+                                                {aufgabe.beschreibung}
+                                              </Typography>
+                                            </Box>
+                                          )}
+                                          {aufgabe.notizen && (
+                                            <Box>
+                                              <Typography variant="caption" color="text.secondary" fontWeight={700}>Notiz</Typography>
+                                              <Typography variant="body2" sx={{ mt: 0.25, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
+                                                {aufgabe.notizen}
+                                              </Typography>
+                                            </Box>
+                                          )}
+                                          <Stack direction="row" gap={0.75} flexWrap="wrap" useFlexGap>
+                                            <Chip size="small" variant="outlined" label={`Fällig: ${datumFormatieren(aufgabe.faelligAm)}`} sx={{ maxWidth: '100%', height: 'auto', '& .MuiChip-label': { whiteSpace: 'normal', py: 0.35, overflowWrap: 'anywhere' } }} />
+                                            {aufgabe.verantwortlich && <Chip size="small" variant="outlined" label={`Verantwortlich: ${aufgabe.verantwortlich}`} sx={{ maxWidth: '100%', height: 'auto', '& .MuiChip-label': { whiteSpace: 'normal', py: 0.35, overflowWrap: 'anywhere' } }} />}
+                                            {aufgabe.wiederholung && aufgabe.wiederholung !== 'Keine' && <Chip size="small" variant="outlined" label={`Wiederholung: ${aufgabe.wiederholung}`} sx={{ maxWidth: '100%', height: 'auto', '& .MuiChip-label': { whiteSpace: 'normal', py: 0.35, overflowWrap: 'anywhere' } }} />}
+                                          </Stack>
+                                          <Stack direction="row" justifyContent="flex-end" gap={1} flexWrap="wrap" useFlexGap>
+                                            <Button size="small" startIcon={<EditIcon />} onClick={() => aufgabeBearbeiten(aufgabe)}>Bearbeiten</Button>
+                                            <Button size="small" color="error" startIcon={<DeleteIcon />} onClick={() => aufgabeLoeschen(aufgabe)}>Löschen</Button>
+                                          </Stack>
+                                        </Stack>
+                                      </Collapse>
+                                    </CardContent>
+                                  </Card>
+                                )
+                              })}
+                            </Stack>
+                          </Collapse>
+                        </Paper>
                       )
                     })}
                   </Stack>
