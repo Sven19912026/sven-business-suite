@@ -1,37 +1,33 @@
-# Sven Business Suite 5.2 – Build-Report
+# Sven Business Suite 5.3 – Build- und Änderungsbericht
 
 ## Umgesetzt
 
-### Dokumente direkt am Vertrag
+### Aufgaben
 
-- Jeder gespeicherte Vertrag besitzt jetzt eine eigene Firebase-Dokumentablage.
-- Die Ablage ist direkt im Reiter „Verträge“ der jeweiligen Lieferantenakte erreichbar.
-- Zusätzlich steht sie in der zentralen Vertragsverwaltung über das Büroklammer-Symbol bereit.
-- Dokumentarten: Vertrag, Nachtrag, Kündigung, Anlage, Korrespondenz und Sonstiges.
-- Drag & Drop, Mehrfach-Upload, Handy-Kamera, Tags, Volltextsuche sowie PDF- und Bildvorschau stehen auch bei Vertragsdokumenten zur Verfügung.
-- Die Dokumente werden unter dem jeweiligen Vertrag in einer eigenen Firestore-Unterkollektion gespeichert.
-- Storage-Dateien verwenden weiterhin den geschützten Pfad `business-suite/{userId}/{ownerType}/{ownerId}/...`.
-- Beim Löschen eines Vertrags werden dessen Storage-Dateien und Firestore-Dokumenteinträge zuerst vollständig entfernt.
+- Jede Aufgabe ist einzeln ein- und ausklappbar.
+- Die eingeklappte Karte zeigt eine kompakte Notizvorschau.
+- Zeilenumbrüche in Notizen und Beschreibungen bleiben erhalten.
+- Lange Texte und Chips umbrechen mobil innerhalb der Karte, ohne seitliches Scrollen.
+- Fälligkeitsdaten werden einschließlich Wochentag angezeigt.
+- Bearbeiten und Löschen befinden sich übersichtlich im ausgeklappten Aufgabenbereich.
 
-### Allgemeine Lieferantendokumente bleiben getrennt
+### Verhandlungsübersicht
 
-- Der bestehende Reiter „Dokumente“ in der Lieferantenakte bleibt unverändert erhalten.
-- Preislisten, Bonusvereinbarungen, Angebote und allgemeine Unterlagen können weiterhin dort gespeichert werden.
-- Bestehende Dokumente werden nicht verschoben oder verändert.
+- Die Verhandlungsseite nutzt am PC die gesamte verfügbare Inhaltsbreite.
+- Die Tabelle verwendet ein festes, kompaktes Spaltenlayout.
+- Die bisherige horizontale Scrollleiste der PC-Tabelle wird vermieden.
+- Kleine Bildschirme und kleinere Laptops verwenden weiterhin die übersichtliche Kartenansicht.
 
-## Rückwärtskompatibilität
+### Version
 
-- Bestehende Lieferanten, Verträge, Verhandlungen, Aufgaben und Dokumente bleiben erhalten.
-- Verträge aus `suiteVertraege` und ältere CRM-Verträge aus `vertraege` werden unterstützt.
-- Die bereits bereitgestellte 30-Tage-Löschfunktion für Verhandlungsdokumente bleibt unverändert.
-- Für die aktuell veröffentlichten Firebase-Regeln ist keine zusätzliche Änderung notwendig.
+- Anwendung, Seitentitel, Metadaten und GitHub-Workflow wurden auf Version 5.3 aktualisiert.
 
-## Prüfung
+## Lokale Prüfung in dieser Umgebung
 
-- `npm run lint`: erfolgreich, keine Fehler.
-- `npm run build`: erfolgreich.
-- PWA-Service-Worker und Web-App-Manifest wurden erzeugt.
-- `node --check functions/index.js`: erfolgreich.
-- Die Vite-Meldung zur Größe des Haupt-Bundles ist nur eine Warnung und kein Build-Fehler.
+- JavaScript-/JSX-Syntaxprüfung aller 14 Quelldateien: erfolgreich.
+- Automatisierte Quellcode-Prüfung der angeforderten Funktionen: erfolgreich.
+- `npm ci`: nicht möglich, weil der in dieser Laufzeit bereitgestellte npm-Paketdienst wiederholt mit HTTP 503 geantwortet hat.
+- Deshalb konnten `npm run lint` und `npm run build` in dieser Laufzeit nicht ehrlich als erfolgreich bestätigt werden.
+- Der veraltete Build-Ordner aus Version 5.2 wurde bewusst entfernt, damit keine alten Dateien als Version 5.3 ausgeliefert werden.
 
-Der vollständige Prüflauf steht in `CHECK-RESULT.txt`.
+Der vorhandene GitHub-Workflow führt nach dem Hochladen automatisch `npm ci` und anschließend `npm run check` aus und erzeugt dabei den aktuellen `dist`-Ordner.

@@ -1,37 +1,27 @@
+Sven Business Suite 5.3 – Prüfergebnis
+======================================
 
-> sven-business-suite@5.2.0 check
-> npm run lint && npm run build
+1. JavaScript-/JSX-Syntaxprüfung
+   Ergebnis: ERFOLGREICH
+   Umfang: 14 Dateien unter src/
 
+2. Funktionsprüfungen im Quellcode
+   - Aufgaben einzeln ausklappbar: vorhanden
+   - Notizvorschau mit Zeilenumbrüchen: vorhanden
+   - Mobile Umbruchregeln ohne seitliches Scrollen: vorhanden
+   - Fälligkeitsdatum mit Wochentag: vorhanden
+   - Breite PC-Verhandlungstabelle ohne horizontalen Regler: vorhanden
+   Ergebnis: ERFOLGREICH
 
-> sven-business-suite@5.2.0 lint
-> eslint .
+3. npm-Abhängigkeiten
+   Befehl: npm ci
+   Ergebnis: NICHT AUSFÜHRBAR
+   Ursache: HTTP 503 des in der Laufzeit bereitgestellten npm-Paketdienstes.
 
+4. npm run lint
+   Ergebnis: NICHT AUSGEFÜHRT, da die Abhängigkeiten wegen HTTP 503 nicht installiert werden konnten.
 
-> sven-business-suite@5.2.0 build
-> vite build
+5. npm run build
+   Ergebnis: NICHT AUSGEFÜHRT, da die Abhängigkeiten wegen HTTP 503 nicht installiert werden konnten.
 
-[36mvite v8.1.5 [32mbuilding client environment for production...[36m[39m
-[2Ktransforming...✓ 1025 modules transformed.
-rendering chunks...
-computing gzip size...
-dist/registerSW.js                           0.13 kB
-dist/manifest.webmanifest                    0.55 kB
-dist/index.html                              0.85 kB │ gzip:   0.49 kB
-dist/assets/pdf.worker.min-DEtVeC4l.mjs  1,255.06 kB
-dist/assets/index-BaKJkjfl.css               0.73 kB │ gzip:   0.38 kB
-dist/assets/src-BR4j_fdn.js                 17.23 kB │ gzip:   7.30 kB
-dist/assets/index-2D-u0x7v.js            1,813.81 kB │ gzip: 534.33 kB
-
-[33m[plugin builtin:vite-reporter] 
-(!) Some chunks are larger than 500 kB after minification. Consider:
-- Using dynamic import() to code-split the application
-- Use build.rolldownOptions.output.codeSplitting to improve chunking: https://rolldown.rs/reference/OutputOptions.codeSplitting
-- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.[39m
-[32m✓ built in 1.23s[39m
-
-PWA v1.3.0
-mode      generateSW
-precache  8 entries (1789.82 KiB)
-files generated
-  dist/sw.js
-  dist/workbox-9c191d2f.js
+Hinweis: Der GitHub-Workflow .github/workflows/deploy.yml führt npm ci und npm run check automatisch aus.

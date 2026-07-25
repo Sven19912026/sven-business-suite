@@ -81,7 +81,9 @@ function heuteIso() {
 function datumFormatieren(value) {
   if (!value) return 'Kein Termin'
   const datum = new Date(`${value}T00:00:00`)
-  return Number.isNaN(datum.getTime()) ? value : datum.toLocaleDateString('de-DE')
+  return Number.isNaN(datum.getTime())
+    ? value
+    : datum.toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric' })
 }
 
 function zeitstempelFormatieren(value) {
@@ -158,6 +160,7 @@ export default function Aufgaben() {
   const [verschiebeAufgaben, setVerschiebeAufgaben] = useState(true)
   const [speichert, setSpeichert] = useState(false)
   const [erledigteOffen, setErledigteOffen] = useState(true)
+  const [offeneAufgaben, setOffeneAufgaben] = useState({})
   const [offenePrioritaeten, setOffenePrioritaeten] = useState(() => {
     const aktuelleUserId = auth.currentUser?.uid
     if (!aktuelleUserId) return {}
@@ -341,6 +344,10 @@ export default function Aufgaben() {
       prioritaetsGruppen.forEach((gruppe) => { naechsterStand[gruppe.id] = offen })
       return offenePrioritaetenSpeichern(naechsterStand)
     })
+  }
+
+  function aufgabeUmschalten(id) {
+    setOffeneAufgaben((vorher) => ({ ...vorher, [id]: !vorher[id] }))
   }
 
   function manuelleSortierungUmschalten(event) {
@@ -592,7 +599,7 @@ export default function Aufgaben() {
       <Paper sx={{ p: { xs: 2.5, sm: 3 } }}>
         <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" gap={2}>
           <Box>
-            <Typography variant="overline" color="primary" fontWeight={800}>Business Suite 5.0</Typography>
+            <Typography variant="overline" color="primary" fontWeight={800}>Business Suite 5.3</Typography>
             <Typography variant="h4" fontWeight={800}>Aufgaben</Typography>
             <Typography color="text.secondary" mt={0.5}>Aufgaben für Arbeit und Privat getrennt planen, priorisieren und verwalten.</Typography>
           </Box>
@@ -675,8 +682,8 @@ export default function Aufgaben() {
         </Stack>
       </Paper>
 
-      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: 'minmax(0, 2fr) minmax(280px, 1fr)' }, gap: 3 }}>
-        <Stack spacing={1.5}>
+      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'minmax(0, 1fr)', lg: 'minmax(0, 2fr) minmax(280px, 1fr)' }, gap: 3, minWidth: 0 }}>
+        <Stack spacing={1.5} sx={{ minWidth: 0 }}>
           <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ sm: 'center' }} gap={1}>
             <Box>
               <Typography variant="h6" fontWeight={800}>Aufgaben nach Priorität</Typography>
@@ -759,6 +766,7 @@ export default function Aufgaben() {
                       const wirdGezogen = gezogeneAufgabeId === aufgabe.id
                       const istDragZiel = dragUeberAufgabeId === aufgabe.id && !wirdGezogen
                       const kategorie = kategorien.find((eintrag) => eintrag.id === aufgabe.kategorieId)
+                      const aufgabeIstOffen = offeneAufgaben[aufgabe.id] === true
                       return (
                         <Card
                           key={aufgabe.id}
@@ -769,6 +777,9 @@ export default function Aufgaben() {
                           onDrop={(event) => aufgabeAblegen(event, aufgabe)}
                           onDragEnd={dragBeenden}
                           sx={{
+                            width: '100%',
+                            maxWidth: '100%',
+                            overflow: 'hidden',
                             opacity: wirdGezogen ? 0.45 : (aufgabe.erledigt ? 0.65 : 1),
                             borderColor: istDragZiel ? 'primary.main' : (ueberfaellig ? 'error.main' : 'divider'),
                             borderWidth: istDragZiel ? 2 : 1,
@@ -777,14 +788,14 @@ export default function Aufgaben() {
                             '&:active': manuelleSortierung ? { cursor: 'grabbing' } : undefined,
                           }}
                         >
-                          <CardContent>
-                            <Stack direction="row" gap={1.25} alignItems="flex-start">
+                          <CardContent sx={{ p: { xs: 1.25, sm: 2 }, '&:last-child': { pb: { xs: 1.25, sm: 2 } } }}>
+                            <Stack direction="row" gap={{ xs: 0.5, sm: 1 }} alignItems="flex-start" sx={{ minWidth: 0 }}>
                               {manuelleSortierung && (
                                 <Tooltip title="Zum Sortieren ziehen">
                                   <Box
                                     aria-label="Aufgabe verschieben"
                                     sx={{
-                                      display: 'grid',
+                                      display: { xs: 'none', sm: 'grid' },
                                       placeItems: 'center',
                                       minWidth: 28,
                                       minHeight: 40,
@@ -796,22 +807,97 @@ export default function Aufgaben() {
                                   </Box>
                                 </Tooltip>
                               )}
-                              <Checkbox checked={aufgabe.erledigt === true} onChange={() => aufgabeStatusAendern(aufgabe)} />
-                              <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-                                <Typography fontWeight={800} sx={{ textDecoration: aufgabe.erledigt ? 'line-through' : 'none' }}>{aufgabe.titel}</Typography>
-                                {aufgabe.beschreibung && <Typography color="text.secondary" mt={0.5}>{aufgabe.beschreibung}</Typography>}
-                                {aufgabe.notizen && <Typography variant="body2" mt={1}><strong>Notiz:</strong> {aufgabe.notizen}</Typography>}
-                                <Stack direction="row" gap={1} flexWrap="wrap" mt={1.5} useFlexGap>
+                              <Checkbox
+                                checked={aufgabe.erledigt === true}
+                                onChange={() => aufgabeStatusAendern(aufgabe)}
+                                sx={{ p: 0.5, flexShrink: 0 }}
+                              />
+                              <Box sx={{ flexGrow: 1, minWidth: 0, overflow: 'hidden' }}>
+                                <Typography
+                                  fontWeight={800}
+                                  sx={{
+                                    textDecoration: aufgabe.erledigt ? 'line-through' : 'none',
+                                    overflowWrap: 'anywhere',
+                                    wordBreak: 'break-word',
+                                  }}
+                                >
+                                  {aufgabe.titel}
+                                </Typography>
+                                {!aufgabeIstOffen && aufgabe.notizen && (
+                                  <Typography
+                                    variant="body2"
+                                    color="text.secondary"
+                                    sx={{
+                                      mt: 0.75,
+                                      whiteSpace: 'pre-wrap',
+                                      overflowWrap: 'anywhere',
+                                      wordBreak: 'break-word',
+                                      lineHeight: 1.45,
+                                      maxHeight: '4.35em',
+                                      overflow: 'hidden',
+                                    }}
+                                  >
+                                    <strong>Notiz:</strong>{' '}{aufgabe.notizen}
+                                  </Typography>
+                                )}
+                                <Stack direction="row" gap={0.75} flexWrap="wrap" mt={1.25} useFlexGap sx={{ minWidth: 0 }}>
                                   <Chip size="small" color={prioritaetsFarbe(aufgabe.prioritaet)} label={aufgabe.prioritaet || 'Mittel'} />
-                                  <Chip size="small" variant="outlined" label={`Kategorie: ${kategorie?.name || 'Ohne Kategorie'}`} />
-                                  <Chip size="small" color={ueberfaellig ? 'error' : 'default'} variant={ueberfaellig ? 'filled' : 'outlined'} label={ueberfaellig ? `Überfällig: ${datumFormatieren(aufgabe.faelligAm)}` : datumFormatieren(aufgabe.faelligAm)} />
-                                  {aufgabe.verantwortlich && <Chip size="small" variant="outlined" label={`Verantwortlich: ${aufgabe.verantwortlich}`} />}
-                                  {aufgabe.wiederholung && aufgabe.wiederholung !== 'Keine' && <Chip size="small" variant="outlined" label={aufgabe.wiederholung} />}
+                                  <Chip size="small" variant="outlined" label={kategorie?.name || 'Ohne Kategorie'} sx={{ maxWidth: '100%', '& .MuiChip-label': { overflow: 'hidden', textOverflow: 'ellipsis' } }} />
+                                  <Chip
+                                    size="small"
+                                    color={ueberfaellig ? 'error' : 'default'}
+                                    variant={ueberfaellig ? 'filled' : 'outlined'}
+                                    label={ueberfaellig ? `Überfällig · ${datumFormatieren(aufgabe.faelligAm)}` : datumFormatieren(aufgabe.faelligAm)}
+                                    sx={{
+                                      maxWidth: '100%',
+                                      height: 'auto',
+                                      '& .MuiChip-label': { whiteSpace: 'normal', py: 0.35, overflowWrap: 'anywhere' },
+                                    }}
+                                  />
                                 </Stack>
                               </Box>
-                              <Tooltip title="Bearbeiten"><IconButton onClick={() => aufgabeBearbeiten(aufgabe)}><EditIcon /></IconButton></Tooltip>
-                              <Tooltip title="Löschen"><IconButton color="error" onClick={() => aufgabeLoeschen(aufgabe)}><DeleteIcon /></IconButton></Tooltip>
+                              <Tooltip title={aufgabeIstOffen ? 'Aufgabe einklappen' : 'Aufgabe ausklappen'}>
+                                <IconButton
+                                  size="small"
+                                  onClick={() => aufgabeUmschalten(aufgabe.id)}
+                                  aria-expanded={aufgabeIstOffen}
+                                  aria-label={aufgabeIstOffen ? 'Aufgabe einklappen' : 'Aufgabe ausklappen'}
+                                  sx={{ flexShrink: 0 }}
+                                >
+                                  {aufgabeIstOffen ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+                                </IconButton>
+                              </Tooltip>
                             </Stack>
+
+                            <Collapse in={aufgabeIstOffen} timeout="auto" unmountOnExit>
+                              <Divider sx={{ my: 1.5 }} />
+                              <Stack spacing={1.25} sx={{ minWidth: 0 }}>
+                                {aufgabe.beschreibung && (
+                                  <Box>
+                                    <Typography variant="caption" color="text.secondary" fontWeight={700}>Beschreibung</Typography>
+                                    <Typography sx={{ mt: 0.25, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
+                                      {aufgabe.beschreibung}
+                                    </Typography>
+                                  </Box>
+                                )}
+                                {aufgabe.notizen && (
+                                  <Box>
+                                    <Typography variant="caption" color="text.secondary" fontWeight={700}>Notiz</Typography>
+                                    <Typography variant="body2" sx={{ mt: 0.25, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
+                                      {aufgabe.notizen}
+                                    </Typography>
+                                  </Box>
+                                )}
+                                <Stack direction="row" gap={0.75} flexWrap="wrap" useFlexGap>
+                                  {aufgabe.verantwortlich && <Chip size="small" variant="outlined" label={`Verantwortlich: ${aufgabe.verantwortlich}`} sx={{ maxWidth: '100%', height: 'auto', '& .MuiChip-label': { whiteSpace: 'normal', py: 0.35, overflowWrap: 'anywhere' } }} />}
+                                  {aufgabe.wiederholung && aufgabe.wiederholung !== 'Keine' && <Chip size="small" variant="outlined" label={`Wiederholung: ${aufgabe.wiederholung}`} sx={{ maxWidth: '100%', height: 'auto', '& .MuiChip-label': { whiteSpace: 'normal', py: 0.35, overflowWrap: 'anywhere' } }} />}
+                                </Stack>
+                                <Stack direction="row" justifyContent="flex-end" gap={1} flexWrap="wrap" useFlexGap>
+                                  <Button size="small" startIcon={<EditIcon />} onClick={() => aufgabeBearbeiten(aufgabe)}>Bearbeiten</Button>
+                                  <Button size="small" color="error" startIcon={<DeleteIcon />} onClick={() => aufgabeLoeschen(aufgabe)}>Löschen</Button>
+                                </Stack>
+                              </Stack>
+                            </Collapse>
                           </CardContent>
                         </Card>
                       )

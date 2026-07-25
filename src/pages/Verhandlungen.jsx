@@ -410,7 +410,7 @@ export default function Verhandlungen({
   onInitialNegotiationOpened,
 }) {
   const theme = useTheme();
-  const istMobil = useMediaQuery(theme.breakpoints.down("md"));
+  const istMobil = useMediaQuery(theme.breakpoints.down("lg"));
 
   const [ansicht, setAnsicht] = useState("verhandlungen");
   const initialNegotiationOpenedRef = useRef("");
@@ -2045,8 +2045,50 @@ eintrag.status !== "Verloren"
               ))}
             </Stack>
           ) : (
-            <TableContainer component={Paper}>
-              <Table stickyHeader>
+            <TableContainer component={Paper} sx={{ width: "100%", overflowX: "hidden" }}>
+              <Table
+                stickyHeader
+                size="small"
+                sx={{
+                  width: "100%",
+                  tableLayout: "fixed",
+                  "& .MuiTableCell-root": {
+                    px: 0.75,
+                    py: 1,
+                    fontSize: "0.78rem",
+                    lineHeight: 1.35,
+                    verticalAlign: "top",
+                    whiteSpace: "normal",
+                    overflowWrap: "anywhere",
+                  },
+                  "& .MuiTableCell-head": {
+                    fontSize: "0.72rem",
+                    fontWeight: 800,
+                    lineHeight: 1.2,
+                  },
+                  "& .MuiChip-root": { maxWidth: "100%" },
+                  "& .MuiChip-label": {
+                    display: "block",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                  },
+                }}
+              >
+                <colgroup>
+                  <col style={{ width: "7%" }} />
+                  <col style={{ width: "6%" }} />
+                  <col style={{ width: "8%" }} />
+                  <col style={{ width: "15%" }} />
+                  <col style={{ width: "7%" }} />
+                  <col style={{ width: "7%" }} />
+                  <col style={{ width: "6%" }} />
+                  <col style={{ width: "6%" }} />
+                  <col style={{ width: "6%" }} />
+                  <col style={{ width: "7%" }} />
+                  <col style={{ width: "7%" }} />
+                  <col style={{ width: "7%" }} />
+                  <col style={{ width: "11%" }} />
+                </colgroup>
                 <TableHead>
                   <TableRow>
                     <TableCell>Für Firma</TableCell>
@@ -2099,7 +2141,7 @@ eintrag.status !== "Verloren"
                           {eintrag.kategorie}
                         </Typography>
                       </TableCell>
-                      <TableCell sx={{ minWidth: 240, maxWidth: 360 }}>
+                      <TableCell sx={{ overflowWrap: "anywhere" }}>
                         <Typography
                           fontWeight={700}
                           sx={{
@@ -2147,14 +2189,15 @@ eintrag.status !== "Verloren"
                       <TableCell>
                         {datumFormat(eintrag.wiedervorlage)}
                       </TableCell>
-                      <TableCell align="right">
+                      <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>
                         <Tooltip title="Ersparnis berechnen">
-                          <IconButton onClick={() => eintragRechnerOeffnen(eintrag)}>
+                          <IconButton size="small" onClick={() => eintragRechnerOeffnen(eintrag)}>
                             <CalculateIcon />
                           </IconButton>
                         </Tooltip>
                         <Tooltip title="Bearbeiten">
                           <IconButton
+                            size="small"
                             onClick={() =>
                               verhandlungBearbeitenOeffnen(eintrag)
                             }
@@ -2164,6 +2207,7 @@ eintrag.status !== "Verloren"
                         </Tooltip>
                         <Tooltip title="Löschen">
                           <IconButton
+                            size="small"
                             color="error"
                             onClick={() => verhandlungLoeschen(eintrag)}
                           >
