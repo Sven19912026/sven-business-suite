@@ -55,6 +55,8 @@ import {
   trackedWriteBatch as writeBatch,
 } from "../firebaseUsage";
 import { auth, db } from '../firebase'
+import { RichTextContent, RichTextEditor } from '../components/RichText'
+import { cleanRichTextForStorage, richTextToPlainText } from '../utils/richText'
 
 const STANDARD_KATEGORIE = 'Allgemein'
 const PRIORITAETEN = ['Hoch', 'Mittel', 'Niedrig']
@@ -357,7 +359,7 @@ export default function Aufgaben() {
     return bereichAufgaben
       .filter((item) => filterStatus === 'Alle' || (filterStatus === 'Erledigt' ? item.erledigt : !item.erledigt))
       .filter((item) => filterKategorie === 'Alle' || item.kategorieId === filterKategorie)
-      .filter((item) => !term || [item.titel, item.beschreibung, item.notizen, item.verantwortlich].some((wert) => String(wert || '').toLowerCase().includes(term)))
+      .filter((item) => !term || [item.titel, richTextToPlainText(item.beschreibung), richTextToPlainText(item.notizen), item.verantwortlich].some((wert) => String(wert || '').toLowerCase().includes(term)))
   }, [bereichAufgaben, filterKategorie, filterStatus, suche])
 
   const prioritaetsGruppen = useMemo(() => PRIORITAETEN
@@ -625,8 +627,8 @@ export default function Aufgaben() {
         manuelleReihenfolge,
         bereich: aufgabeForm.bereich || bereich,
         titel: aufgabeForm.titel.trim(),
-        beschreibung: aufgabeForm.beschreibung.trim(),
-        notizen: aufgabeForm.notizen.trim(),
+        beschreibung: cleanRichTextForStorage(aufgabeForm.beschreibung),
+        notizen: cleanRichTextForStorage(aufgabeForm.notizen),
         verantwortlich: aufgabeForm.verantwortlich.trim(),
         erledigt,
         userId: user.uid,
@@ -726,7 +728,7 @@ export default function Aufgaben() {
       <Paper sx={{ p: { xs: 2.5, sm: 3 } }}>
         <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" gap={2}>
           <Box>
-            <Typography variant="overline" color="primary" fontWeight={800}>Business Suite 5.4.0</Typography>
+            <Typography variant="overline" color="primary" fontWeight={800}>Business Suite 5.5.0</Typography>
             <Typography variant="h4" fontWeight={800}>Aufgaben</Typography>
             <Typography color="text.secondary" mt={0.5}>Aufgaben für Arbeit und Privat getrennt planen, priorisieren und verwalten.</Typography>
           </Box>
@@ -1005,21 +1007,21 @@ export default function Aufgaben() {
                                             {aufgabe.titel}
                                           </Typography>
                                           {!aufgabeIstOffen && aufgabe.notizen && (
-                                            <Typography
-                                              variant="body2"
-                                              color="text.secondary"
-                                              sx={{
-                                                mt: 0.75,
-                                                whiteSpace: 'pre-wrap',
-                                                overflowWrap: 'anywhere',
-                                                wordBreak: 'break-word',
-                                                lineHeight: 1.45,
-                                                maxHeight: '4.35em',
-                                                overflow: 'hidden',
-                                              }}
-                                            >
-                                              <strong>Notiz:</strong>{' '}{aufgabe.notizen}
-                                            </Typography>
+                                            <Box sx={{ mt: 0.75, color: 'text.secondary' }}>
+                                              <Typography variant="caption" color="text.secondary" fontWeight={700}>
+                                                Notiz
+                                              </Typography>
+                                              <RichTextContent
+                                                value={aufgabe.notizen}
+                                                sx={{
+                                                  mt: 0.15,
+                                                  fontSize: '0.875rem',
+                                                  lineHeight: 1.45,
+                                                  maxHeight: '4.35em',
+                                                  overflow: 'hidden',
+                                                }}
+                                              />
+                                            </Box>
                                           )}
                                           <Stack direction="row" gap={0.75} flexWrap="wrap" mt={1.25} useFlexGap sx={{ minWidth: 0 }}>
                                             <Chip size="small" color={prioritaetsFarbe(aufgabe.prioritaet)} label={aufgabe.prioritaet || 'Mittel'} />
@@ -1046,17 +1048,13 @@ export default function Aufgaben() {
                                           {aufgabe.beschreibung && (
                                             <Box>
                                               <Typography variant="caption" color="text.secondary" fontWeight={700}>Beschreibung</Typography>
-                                              <Typography sx={{ mt: 0.25, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
-                                                {aufgabe.beschreibung}
-                                              </Typography>
+                                              <RichTextContent value={aufgabe.beschreibung} sx={{ mt: 0.25 }} />
                                             </Box>
                                           )}
                                           {aufgabe.notizen && (
                                             <Box>
                                               <Typography variant="caption" color="text.secondary" fontWeight={700}>Notiz</Typography>
-                                              <Typography variant="body2" sx={{ mt: 0.25, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
-                                                {aufgabe.notizen}
-                                              </Typography>
+                                              <RichTextContent value={aufgabe.notizen} sx={{ mt: 0.25, fontSize: '0.875rem' }} />
                                             </Box>
                                           )}
                                           <Stack direction="row" gap={0.75} flexWrap="wrap" useFlexGap>
@@ -1145,8 +1143,18 @@ export default function Aufgaben() {
             sx={{ alignSelf: 'flex-start', fontWeight: 750 }}
           />
           <TextField label="Titel" value={aufgabeForm.titel} onChange={(e) => setAufgabeForm({ ...aufgabeForm, titel: e.target.value })} required autoFocus />
-          <TextField label="Beschreibung" value={aufgabeForm.beschreibung} onChange={(e) => setAufgabeForm({ ...aufgabeForm, beschreibung: e.target.value })} multiline minRows={2} />
-          <TextField label="Notizen" value={aufgabeForm.notizen} onChange={(e) => setAufgabeForm({ ...aufgabeForm, notizen: e.target.value })} multiline minRows={2} />
+          <RichTextEditor
+            label="Beschreibung"
+            value={aufgabeForm.beschreibung}
+            onChange={(value) => setAufgabeForm((vorher) => ({ ...vorher, beschreibung: value }))}
+            minHeight={100}
+          />
+          <RichTextEditor
+            label="Notizen"
+            value={aufgabeForm.notizen}
+            onChange={(value) => setAufgabeForm((vorher) => ({ ...vorher, notizen: value }))}
+            minHeight={100}
+          />
           <TextField label="Verantwortlich" value={aufgabeForm.verantwortlich} onChange={(e) => setAufgabeForm({ ...aufgabeForm, verantwortlich: e.target.value })} />
           <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
             <TextField select fullWidth label="Kategorie" value={aufgabeForm.kategorieId} onChange={(e) => setAufgabeForm({ ...aufgabeForm, kategorieId: e.target.value })} required>{sortierteKategorien.map((item) => <MenuItem key={item.id} value={item.id}>{item.name}</MenuItem>)}</TextField>

@@ -75,6 +75,8 @@ import {
 
 import { auth, db } from "../firebase";
 import Dokumentablage from "../components/Dokumentablage";
+import { RichTextContent, RichTextEditor } from "../components/RichText";
+import { cleanRichTextForStorage, richTextToPlainText } from "../utils/richText";
 import {
   VERHANDLUNG_DOKUMENT_KATEGORIEN,
   addiereTage,
@@ -650,7 +652,7 @@ eintrag.status !== "Verloren"
         eintrag.kategorie?.toLowerCase().includes(suchbegriff) ||
         eintrag.email?.toLowerCase().includes(suchbegriff) ||
         lieferterminAnzeige(eintrag).toLowerCase().includes(suchbegriff) ||
-        eintrag.notizen?.toLowerCase().includes(suchbegriff);
+        richTextToPlainText(eintrag.notizen).toLowerCase().includes(suchbegriff);
 
       return passtStatus && passtPrioritaet && passtAuftraggeber && passtSuche;
     });
@@ -986,6 +988,7 @@ eintrag.status !== "Verloren"
       auftraggeberName: verhandlungsFormular.auftraggeberName.trim(),
       verhandlungsgegenstand:
         verhandlungsFormular.verhandlungsgegenstand.trim(),
+      notizen: cleanRichTextForStorage(verhandlungsFormular.notizen),
       userId: benutzer.uid,
       ausgangsangebot: euroWert(verhandlungsFormular.ausgangsangebot),
       aktuellesAngebot: euroWert(verhandlungsFormular.aktuellesAngebot),
@@ -1458,6 +1461,10 @@ eintrag.status !== "Verloren"
     }[zeichen]));
   }
 
+  function htmlSicherMitZeilenumbruechen(value) {
+    return htmlSicher(value).replace(/\r?\n/g, "<br>");
+  }
+
   function uebergabeAlsPdfDrucken() {
     const auswahl = uebergabeVerhandlungen.filter((eintrag) => uebergabeAuswahl.includes(eintrag.id));
     if (!auswahl.length) return;
@@ -1469,7 +1476,7 @@ eintrag.status !== "Verloren"
         <td>${htmlSicher(lieferterminAnzeige(eintrag))}</td>
         <td>${htmlSicher(eintrag.wiedervorlage ? datumFormat(eintrag.wiedervorlage) : "—")}</td>
         <td>${htmlSicher(euroFormat(eintrag.aktuellesAngebot))}<br><small>Ersparnis: ${htmlSicher(euroFormat(einsparung(eintrag)))} (${htmlSicher(prozentFormat(einsparungProzent(eintrag)))})</small></td>
-        <td>${htmlSicher(eintrag.notizen || "—")}</td>
+        <td>${htmlSicherMitZeilenumbruechen(richTextToPlainText(eintrag.notizen) || "—")}</td>
       </tr>`).join("");
     const druckHtml = `<!doctype html><html><head><meta charset="utf-8"><title>Urlaubsübergabe Verhandlungen</title><style>body{font-family:Arial,sans-serif;color:#172033;margin:28px}h1{margin:0 0 6px}.meta{color:#667085;margin-bottom:22px}table{width:100%;border-collapse:collapse;font-size:11px}th,td{border:1px solid #d0d5dd;padding:8px;vertical-align:top;text-align:left}th{background:#f2f4f7}tr{page-break-inside:avoid}@page{size:landscape;margin:10mm}@media print{body{margin:0}}</style></head><body><h1>Urlaubsübergabe – Verhandlungen</h1><div class="meta">Erstellt am ${new Date().toLocaleString("de-DE")} · ${auswahl.length} ausgewählte Verhandlung(en)</div><table><thead><tr><th>Status</th><th>Firma / Gegenstand</th><th>Ansprechpartner / Kontakt</th><th>Liefertermin</th><th>Wiedervorlage</th><th>Aktueller Stand</th><th>Notizen</th></tr></thead><tbody>${zeilen}</tbody></table></body></html>`;
 
@@ -1971,6 +1978,15 @@ eintrag.status !== "Verloren"
                       </Typography>
                     </Paper>
 
+                    {eintrag.notizen && (
+                      <Paper variant="outlined" sx={{ p: 1.5, mt: 1.5 }}>
+                        <Typography variant="caption" color="text.secondary" fontWeight={700}>
+                          Notizen
+                        </Typography>
+                        <RichTextContent value={eintrag.notizen} sx={{ mt: 0.25, fontSize: '0.875rem' }} />
+                      </Paper>
+                    )}
+
                     <Stack
                       direction="row"
                       spacing={1}
@@ -2151,6 +2167,17 @@ eintrag.status !== "Verloren"
                         >
                           {eintrag.verhandlungsgegenstand || "—"}
                         </Typography>
+                        {eintrag.notizen && (
+                          <Box sx={{ mt: 0.75, pt: 0.75, borderTop: 1, borderColor: 'divider' }}>
+                            <Typography variant="caption" color="text.secondary" fontWeight={700}>
+                              Notizen
+                            </Typography>
+                            <RichTextContent
+                              value={eintrag.notizen}
+                              sx={{ mt: 0.15, fontSize: '0.75rem', maxHeight: '6em', overflow: 'hidden' }}
+                            />
+                          </Box>
+                        )}
                       </TableCell>
                       <TableCell>
                         {eintrag.ansprechpartner || "—"}
@@ -2771,14 +2798,11 @@ eintrag.status !== "Verloren"
               />
             </Grid>
             <Grid size={{ xs: 12 }}>
-              <TextField
-                fullWidth
-                multiline
-                minRows={4}
+              <RichTextEditor
                 label="Notizen"
-                name="notizen"
                 value={verhandlungsFormular.notizen}
-                onChange={verhandlungsFeldAendern}
+                onChange={(value) => setVerhandlungsFormular((vorher) => ({ ...vorher, notizen: value }))}
+                minHeight={140}
               />
             </Grid>
             <Grid size={{ xs: 12 }}>
