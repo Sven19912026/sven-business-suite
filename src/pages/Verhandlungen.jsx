@@ -87,6 +87,20 @@ import {
   verhandlungsFristInitialisieren,
 } from "../services/dokumente";
 
+const STANDARD_LIEFERANTEN_KATEGORIEN = [
+  "Diesellieferanten",
+  "Baustofflieferanten",
+  "Stahllieferanten",
+  "Elektrolieferanten",
+  "Werkzeuglieferanten",
+  "Material",
+  "Maschine",
+  "Fahrzeug",
+  "Dienstleistung",
+  "Personal",
+  "Sonstiges",
+];
+
 const leerVerhandlungsFormular = {
   auftraggeberId: "",
   auftraggeberName: "",
@@ -102,6 +116,7 @@ const leerVerhandlungsFormular = {
   prioritaet: "Mittel",
   ausgangsangebot: "",
   aktuellesAngebot: "",
+  skonto: "",
   zielpreis: "",
   schmerzgrenze: "",
   lieferterminArt: "datum",
@@ -189,8 +204,25 @@ const leerFahrzeugFormular = {
 };
 
 function euroWert(wert) {
-  const zahl = Number(wert);
+  if (wert === "" || wert === null || wert === undefined) return 0;
+  const normalisiert = String(wert).replace(/\s/g, "").replace(",", ".");
+  const zahl = Number(normalisiert);
   return Number.isFinite(zahl) ? zahl : 0;
+}
+
+function prozentWert(wert) {
+  const treffer = String(wert ?? "").replace(",", ".").match(/-?\d+(?:\.\d+)?/);
+  const zahl = treffer ? Number(treffer[0]) : 0;
+  return Math.min(Math.max(Number.isFinite(zahl) ? zahl : 0, 0), 100);
+}
+
+function betragNachSkonto(eintrag) {
+  const verhandelt = Math.max(euroWert(eintrag.aktuellesAngebot), 0);
+  return verhandelt * (1 - prozentWert(eintrag.skonto) / 100);
+}
+
+function skontoAbzug(eintrag) {
+  return Math.max(euroWert(eintrag.aktuellesAngebot) - betragNachSkonto(eintrag), 0);
 }
 
 function euroFormat(wert) {
@@ -353,7 +385,7 @@ function heuteText() {
 
 function einsparung(eintrag) {
   return Math.max(
-    euroWert(eintrag.ausgangsangebot) - euroWert(eintrag.aktuellesAngebot),
+    euroWert(eintrag.ausgangsangebot) - betragNachSkonto(eintrag),
     0
   );
 }
@@ -721,6 +753,15 @@ eintrag.status !== "Verloren"
     lieferantenStatusFilter,
   ]);
 
+  const lieferantenKategorien = useMemo(() => {
+    const vorhandene = lieferanten
+      .map((eintrag) => String(eintrag.kategorie || "").trim())
+      .filter(Boolean);
+
+    return [...new Set([...STANDARD_LIEFERANTEN_KATEGORIEN, ...vorhandene])]
+      .sort((a, b) => a.localeCompare(b, "de"));
+  }, [lieferanten]);
+
   const fahrzeugZaehler = useMemo(() => {
     return fahrzeugverhandlungen.reduce(
       (summe, eintrag) => {
@@ -841,6 +882,7 @@ eintrag.status !== "Verloren"
           ausgewaehlt?.email ||
           vorher.email,
         kategorie: ausgewaehlt?.kategorie ?? vorher.kategorie,
+        skonto: vorher.skonto || (prozentWert(ausgewaehlt?.skonto) || ""),
       }));
       return;
     }
@@ -876,6 +918,7 @@ eintrag.status !== "Verloren"
       prioritaet: eintrag.prioritaet ?? "Mittel",
       ausgangsangebot: eintrag.ausgangsangebot ?? "",
       aktuellesAngebot: eintrag.aktuellesAngebot ?? "",
+      skonto: eintrag.skonto ?? "",
       zielpreis: eintrag.zielpreis ?? "",
       schmerzgrenze: eintrag.schmerzgrenze ?? "",
       ...lieferterminFormularwerte(eintrag, "liefertermin"),
@@ -985,6 +1028,7 @@ eintrag.status !== "Verloren"
       ...verhandlungsFormular,
       status,
       firma: verhandlungsFormular.firma.trim(),
+      kategorie: String(verhandlungsFormular.kategorie || "").trim() || "Sonstiges",
       auftraggeberName: verhandlungsFormular.auftraggeberName.trim(),
       verhandlungsgegenstand:
         verhandlungsFormular.verhandlungsgegenstand.trim(),
@@ -992,6 +1036,8 @@ eintrag.status !== "Verloren"
       userId: benutzer.uid,
       ausgangsangebot: euroWert(verhandlungsFormular.ausgangsangebot),
       aktuellesAngebot: euroWert(verhandlungsFormular.aktuellesAngebot),
+      skonto: prozentWert(verhandlungsFormular.skonto),
+      betragNachSkonto: betragNachSkonto(verhandlungsFormular),
       zielpreis: euroWert(verhandlungsFormular.zielpreis),
       schmerzgrenze: euroWert(verhandlungsFormular.schmerzgrenze),
       liefertermin:
@@ -1057,6 +1103,8 @@ eintrag.status !== "Verloren"
 
     const daten = {
       ...lieferantenFormular,
+      firma: lieferantenFormular.firma.trim(),
+      kategorie: String(lieferantenFormular.kategorie || "").trim() || "Sonstiges",
       userId: benutzer.uid,
       geaendertAm: serverTimestamp(),
     };
@@ -1163,7 +1211,8 @@ eintrag.status !== "Verloren"
 
   function formularRechnerOeffnen() {
     const kandidaten = [
-      { bezeichnung: "Aktuelles Angebot", wert: verhandlungsFormular.aktuellesAngebot },
+      { bezeichnung: "Verhandelter Betrag", wert: verhandlungsFormular.aktuellesAngebot },
+      { bezeichnung: "Betrag nach Skonto", wert: betragNachSkonto(verhandlungsFormular) },
       { bezeichnung: "Zielpreis", wert: verhandlungsFormular.zielpreis },
       { bezeichnung: "Schmerzgrenze", wert: verhandlungsFormular.schmerzgrenze },
     ].filter((eintrag) => String(eintrag.wert ?? "").trim() !== "");
@@ -1179,7 +1228,8 @@ eintrag.status !== "Verloren"
     rechnerOeffnen({
       ausgang: eintrag.ausgangsangebot,
       vergleiche: [
-        { bezeichnung: "Aktuelles Angebot", wert: eintrag.aktuellesAngebot },
+        { bezeichnung: "Verhandelter Betrag", wert: eintrag.aktuellesAngebot },
+        { bezeichnung: "Betrag nach Skonto", wert: betragNachSkonto(eintrag) },
         { bezeichnung: "Zielpreis", wert: eintrag.zielpreis },
         { bezeichnung: "Schmerzgrenze", wert: eintrag.schmerzgrenze },
       ].filter((vergleich) => String(vergleich.wert ?? "").trim() !== ""),
@@ -1475,7 +1525,7 @@ eintrag.status !== "Verloren"
         <td><strong>${htmlSicher(eintrag.ansprechpartner || "—")}</strong><br><small>${htmlSicher(eintrag.telefon || "Keine Telefonnummer")}<br>${htmlSicher(eintrag.email || "Keine E-Mail")}</small></td>
         <td>${htmlSicher(lieferterminAnzeige(eintrag))}</td>
         <td>${htmlSicher(eintrag.wiedervorlage ? datumFormat(eintrag.wiedervorlage) : "—")}</td>
-        <td>${htmlSicher(euroFormat(eintrag.aktuellesAngebot))}<br><small>Ersparnis: ${htmlSicher(euroFormat(einsparung(eintrag)))} (${htmlSicher(prozentFormat(einsparungProzent(eintrag)))})</small></td>
+        <td>${htmlSicher(euroFormat(eintrag.aktuellesAngebot))}<br><small>Skonto: ${htmlSicher(prozentFormat(prozentWert(eintrag.skonto)))} · nach Skonto: ${htmlSicher(euroFormat(betragNachSkonto(eintrag)))}</small><br><small>Ersparnis: ${htmlSicher(euroFormat(einsparung(eintrag)))} (${htmlSicher(prozentFormat(einsparungProzent(eintrag)))})</small></td>
         <td>${htmlSicherMitZeilenumbruechen(richTextToPlainText(eintrag.notizen) || "—")}</td>
       </tr>`).join("");
     const druckHtml = `<!doctype html><html><head><meta charset="utf-8"><title>Urlaubsübergabe Verhandlungen</title><style>body{font-family:Arial,sans-serif;color:#172033;margin:28px}h1{margin:0 0 6px}.meta{color:#667085;margin-bottom:22px}table{width:100%;border-collapse:collapse;font-size:11px}th,td{border:1px solid #d0d5dd;padding:8px;vertical-align:top;text-align:left}th{background:#f2f4f7}tr{page-break-inside:avoid}@page{size:landscape;margin:10mm}@media print{body{margin:0}}</style></head><body><h1>Urlaubsübergabe – Verhandlungen</h1><div class="meta">Erstellt am ${new Date().toLocaleString("de-DE")} · ${auswahl.length} ausgewählte Verhandlung(en)</div><table><thead><tr><th>Status</th><th>Firma / Gegenstand</th><th>Ansprechpartner / Kontakt</th><th>Liefertermin</th><th>Wiedervorlage</th><th>Aktueller Stand</th><th>Notizen</th></tr></thead><tbody>${zeilen}</tbody></table></body></html>`;
@@ -2022,10 +2072,18 @@ eintrag.status !== "Verloren"
                       </Grid>
                       <Grid size={{ xs: 6 }}>
                         <Typography variant="caption" color="text.secondary">
-                          Aktuell
+                          Verhandelt
                         </Typography>
                         <Typography fontWeight={700}>
                           {euroFormat(eintrag.aktuellesAngebot)}
+                        </Typography>
+                      </Grid>
+                      <Grid size={{ xs: 6 }}>
+                        <Typography variant="caption" color="text.secondary">
+                          Nach Skonto ({prozentFormat(prozentWert(eintrag.skonto))})
+                        </Typography>
+                        <Typography fontWeight={800} color="primary.main">
+                          {euroFormat(betragNachSkonto(eintrag))}
                         </Typography>
                       </Grid>
                       <Grid size={{ xs: 6 }}>
@@ -2137,7 +2195,7 @@ eintrag.status !== "Verloren"
                     <TableCell>Status</TableCell>
                     <TableCell>Priorität</TableCell>
                     <TableCell align="right">Ausgang</TableCell>
-                    <TableCell align="right">Aktuell</TableCell>
+                    <TableCell align="right">Verhandelt</TableCell>
                     <TableCell align="right">Einsparung</TableCell>
                     <TableCell>Liefertermin</TableCell>
                     <TableCell>Wiedervorlage</TableCell>
@@ -2200,7 +2258,10 @@ eintrag.status !== "Verloren"
                         {euroFormat(eintrag.ausgangsangebot)}
                       </TableCell>
                       <TableCell align="right">
-                        {euroFormat(eintrag.aktuellesAngebot)}
+                        <Typography fontWeight={700}>{euroFormat(eintrag.aktuellesAngebot)}</Typography>
+                        <Typography variant="caption" color="primary.main" fontWeight={700}>
+                          nach {prozentFormat(prozentWert(eintrag.skonto))} Skonto: {euroFormat(betragNachSkonto(eintrag))}
+                        </Typography>
                       </TableCell>
                       <TableCell align="right">
                         <Typography fontWeight={800} color="success.main">
@@ -2334,12 +2395,9 @@ eintrag.status !== "Verloren"
                   }
                 >
                   <MenuItem value="Alle">Alle</MenuItem>
-                  <MenuItem value="Material">Material</MenuItem>
-                  <MenuItem value="Maschine">Maschine</MenuItem>
-                  <MenuItem value="Fahrzeug">Fahrzeug</MenuItem>
-                  <MenuItem value="Dienstleistung">Dienstleistung</MenuItem>
-                  <MenuItem value="Personal">Personal</MenuItem>
-                  <MenuItem value="Sonstiges">Sonstiges</MenuItem>
+                  {lieferantenKategorien.map((kategorie) => (
+                    <MenuItem key={kategorie} value={kategorie}>{kategorie}</MenuItem>
+                  ))}
                 </TextField>
               </Grid>
               <Grid size={{ xs: 12, sm: 6, md: 3 }}>
@@ -2684,20 +2742,20 @@ eintrag.status !== "Verloren"
             </Grid>
             <Grid size={{ xs: 12, md: 4 }}>
               <TextField
-                select
                 fullWidth
                 label="Kategorie"
                 name="kategorie"
                 value={verhandlungsFormular.kategorie}
                 onChange={verhandlungsFeldAendern}
-              >
-                <MenuItem value="Material">Material</MenuItem>
-                <MenuItem value="Maschine">Maschine</MenuItem>
-                <MenuItem value="Fahrzeug">Fahrzeug</MenuItem>
-                <MenuItem value="Dienstleistung">Dienstleistung</MenuItem>
-                <MenuItem value="Personal">Personal</MenuItem>
-                <MenuItem value="Sonstiges">Sonstiges</MenuItem>
-              </TextField>
+                placeholder="z. B. Diesellieferanten"
+                helperText="Freie Kategorie; vorhandene Kategorien werden vorgeschlagen."
+                inputProps={{ list: "verhandlungs-kategorien" }}
+              />
+              <datalist id="verhandlungs-kategorien">
+                {lieferantenKategorien.map((kategorie) => (
+                  <option key={kategorie} value={kategorie} />
+                ))}
+              </datalist>
             </Grid>
             <Grid size={{ xs: 12, md: 4 }}>
               <TextField
@@ -2730,7 +2788,7 @@ eintrag.status !== "Verloren"
                 <MenuItem value="Hoch">Hoch</MenuItem>
               </TextField>
             </Grid>
-            <Grid size={{ xs: 12, md: 3 }}>
+            <Grid size={{ xs: 12, md: 4 }}>
               <TextField
                 fullWidth
                 label="Ausgangsangebot"
@@ -2738,19 +2796,33 @@ eintrag.status !== "Verloren"
                 name="ausgangsangebot"
                 value={verhandlungsFormular.ausgangsangebot}
                 onChange={verhandlungsFeldAendern}
+                inputProps={{ min: 0, step: 0.01 }}
               />
             </Grid>
-            <Grid size={{ xs: 12, md: 3 }}>
+            <Grid size={{ xs: 12, md: 4 }}>
               <TextField
                 fullWidth
-                label="Aktuelles Angebot"
+                label="Verhandelter Betrag"
                 type="number"
                 name="aktuellesAngebot"
                 value={verhandlungsFormular.aktuellesAngebot}
                 onChange={verhandlungsFeldAendern}
+                inputProps={{ min: 0, step: 0.01 }}
               />
             </Grid>
-            <Grid size={{ xs: 12, md: 3 }}>
+            <Grid size={{ xs: 12, md: 4 }}>
+              <TextField
+                fullWidth
+                label="Skonto in %"
+                type="number"
+                name="skonto"
+                value={verhandlungsFormular.skonto}
+                onChange={verhandlungsFeldAendern}
+                inputProps={{ min: 0, max: 100, step: 0.01 }}
+                helperText="Wird automatisch vom verhandelten Betrag abgezogen."
+              />
+            </Grid>
+            <Grid size={{ xs: 12, md: 6 }}>
               <TextField
                 fullWidth
                 label="Zielpreis"
@@ -2758,9 +2830,10 @@ eintrag.status !== "Verloren"
                 name="zielpreis"
                 value={verhandlungsFormular.zielpreis}
                 onChange={verhandlungsFeldAendern}
+                inputProps={{ min: 0, step: 0.01 }}
               />
             </Grid>
-            <Grid size={{ xs: 12, md: 3 }}>
+            <Grid size={{ xs: 12, md: 6 }}>
               <TextField
                 fullWidth
                 label="Schmerzgrenze"
@@ -2768,7 +2841,26 @@ eintrag.status !== "Verloren"
                 name="schmerzgrenze"
                 value={verhandlungsFormular.schmerzgrenze}
                 onChange={verhandlungsFeldAendern}
+                inputProps={{ min: 0, step: 0.01 }}
               />
+            </Grid>
+            <Grid size={{ xs: 12 }}>
+              <Paper variant="outlined" sx={{ p: 2, bgcolor: "action.hover" }}>
+                <Grid container spacing={2}>
+                  <Grid size={{ xs: 12, sm: 4 }}>
+                    <Typography variant="caption" color="text.secondary" fontWeight={800}>SKONTOABZUG</Typography>
+                    <Typography fontWeight={850}>{euroFormat(skontoAbzug(verhandlungsFormular))}</Typography>
+                  </Grid>
+                  <Grid size={{ xs: 12, sm: 4 }}>
+                    <Typography variant="caption" color="text.secondary" fontWeight={800}>BETRAG NACH SKONTO</Typography>
+                    <Typography fontWeight={900} color="primary.main">{euroFormat(betragNachSkonto(verhandlungsFormular))}</Typography>
+                  </Grid>
+                  <Grid size={{ xs: 12, sm: 4 }}>
+                    <Typography variant="caption" color="text.secondary" fontWeight={800}>GESAMTERSPARNIS</Typography>
+                    <Typography fontWeight={900} color="success.main">{euroFormat(einsparung(verhandlungsFormular))}</Typography>
+                  </Grid>
+                </Grid>
+              </Paper>
             </Grid>
             <Grid size={{ xs: 12 }}>
               <Button
@@ -3021,20 +3113,20 @@ eintrag.status !== "Verloren"
             </Grid>
             <Grid size={{ xs: 12, md: 6 }}>
               <TextField
-                select
                 fullWidth
                 label="Kategorie"
                 name="kategorie"
                 value={lieferantenFormular.kategorie}
                 onChange={lieferantenFeldAendern}
-              >
-                <MenuItem value="Material">Material</MenuItem>
-                <MenuItem value="Maschine">Maschine</MenuItem>
-                <MenuItem value="Fahrzeug">Fahrzeug</MenuItem>
-                <MenuItem value="Dienstleistung">Dienstleistung</MenuItem>
-                <MenuItem value="Personal">Personal</MenuItem>
-                <MenuItem value="Sonstiges">Sonstiges</MenuItem>
-              </TextField>
+                placeholder="z. B. Diesellieferanten"
+                helperText="Neue Kategorien können frei eingetragen werden."
+                inputProps={{ list: "lieferanten-kategorien-verhandlungen" }}
+              />
+              <datalist id="lieferanten-kategorien-verhandlungen">
+                {lieferantenKategorien.map((kategorie) => (
+                  <option key={kategorie} value={kategorie} />
+                ))}
+              </datalist>
             </Grid>
             <Grid size={{ xs: 12, md: 6 }}>
               <TextField

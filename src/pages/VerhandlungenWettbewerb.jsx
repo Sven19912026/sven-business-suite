@@ -112,40 +112,31 @@ function euro(value) {
   }).format(zahl(value))
 }
 
-function gesamtkosten(anbieter) {
+function prozent(value) {
+  return Math.min(Math.max(zahl(value), 0), 100)
+}
+
+function preisNachRabatt(anbieter) {
   const preis = Math.max(zahl(anbieter.preis), 0)
+  return preis * (1 - prozent(anbieter.rabatt) / 100)
+}
 
-  const rabatt = Math.min(
-    Math.max(zahl(anbieter.rabatt), 0),
-    100,
-  )
+function betragNachSkonto(anbieter) {
+  return preisNachRabatt(anbieter) * (1 - prozent(anbieter.skonto) / 100)
+}
 
-  const skonto = Math.min(
-    Math.max(zahl(anbieter.skonto), 0),
-    100,
-  )
+function skontoAbzug(anbieter) {
+  return Math.max(preisNachRabatt(anbieter) - betragNachSkonto(anbieter), 0)
+}
 
-  const transportkosten = Math.max(
-    zahl(anbieter.transportkosten),
-    0,
-  )
+function rabattAbzug(anbieter) {
+  return Math.max(Math.max(zahl(anbieter.preis), 0) - preisNachRabatt(anbieter), 0)
+}
 
-  const nebenkosten = Math.max(
-    zahl(anbieter.nebenkosten),
-    0,
-  )
-
-  const preisNachRabatt =
-    preis * (1 - rabatt / 100)
-
-  const preisNachSkonto =
-    preisNachRabatt * (1 - skonto / 100)
-
-  return (
-    preisNachSkonto +
-    transportkosten +
-    nebenkosten
-  )
+function gesamtkosten(anbieter) {
+  const transportkosten = Math.max(zahl(anbieter.transportkosten), 0)
+  const nebenkosten = Math.max(zahl(anbieter.nebenkosten), 0)
+  return betragNachSkonto(anbieter) + transportkosten + nebenkosten
 }
 
 function billigsterAnbieter(anbieter = []) {
@@ -536,6 +527,12 @@ export default function VerhandlungenWettbewerb() {
           zahlungsziel:
             anbieter.zahlungsziel,
 
+          rabattAbzug: rabattAbzug(anbieter),
+
+          skontoAbzug: skontoAbzug(anbieter),
+
+          betragNachSkonto: betragNachSkonto(anbieter),
+
           gesamtkosten:
             gesamtkosten(anbieter),
         }),
@@ -854,7 +851,7 @@ export default function VerhandlungenWettbewerb() {
                             </TableCell>
 
                             <TableCell align="right">
-                              Preis
+                              Verhandelt
                             </TableCell>
 
                             <TableCell align="right">
@@ -952,8 +949,13 @@ export default function VerhandlungenWettbewerb() {
                                   </TableCell>
 
                                   <TableCell align="right">
-                                    {euro(
-                                      eintrag.preis,
+                                    <Typography fontWeight={750}>
+                                      {euro(eintrag.preis)}
+                                    </Typography>
+                                    {prozent(eintrag.rabatt) > 0 && (
+                                      <Typography variant="caption" color="text.secondary">
+                                        nach Rabatt: {euro(preisNachRabatt(eintrag))}
+                                      </Typography>
                                     )}
                                   </TableCell>
 
@@ -965,10 +967,13 @@ export default function VerhandlungenWettbewerb() {
                                   </TableCell>
 
                                   <TableCell align="right">
-                                    {zahl(
-                                      eintrag.skonto,
-                                    )}{' '}
-                                    %
+                                    <Typography>{prozent(eintrag.skonto)} %</Typography>
+                                    <Typography variant="caption" color="success.main" fontWeight={750}>
+                                      − {euro(skontoAbzug(eintrag))}
+                                    </Typography>
+                                    <Typography variant="caption" display="block" color="primary.main" fontWeight={750}>
+                                      nach Skonto: {euro(betragNachSkonto(eintrag))}
+                                    </Typography>
                                   </TableCell>
 
                                   <TableCell align="right">
@@ -1340,7 +1345,7 @@ export default function VerhandlungenWettbewerb() {
 
                       <TextField
                         fullWidth
-                        label="Preis netto"
+                        label="Verhandelter Betrag netto"
                         type="number"
                         value={anbieter.preis}
                         onChange={(event) =>
@@ -1354,6 +1359,7 @@ export default function VerhandlungenWettbewerb() {
                           min: 0,
                           step: 0.01,
                         }}
+                        helperText="Skonto wird automatisch von diesem Betrag bzw. vom Betrag nach Rabatt abgezogen."
                       />
 
                       <TextField
@@ -1515,24 +1521,34 @@ export default function VerhandlungenWettbewerb() {
                               : 'background.default',
                         }}
                       >
-                        <Typography
-                          variant="caption"
-                          color="text.secondary"
-                          fontWeight={800}
-                        >
-                          GESAMTKOSTEN
+                        <Typography variant="caption" color="text.secondary" fontWeight={800}>
+                          KALKULATION
                         </Typography>
-
-                        <Typography
-                          variant="h6"
-                          fontWeight={900}
-                        >
-                          {euro(
-                            gesamtkosten(
-                              anbieter,
-                            ),
+                        <Stack spacing={0.35} sx={{ mt: 0.5 }}>
+                          <Stack direction="row" justifyContent="space-between" gap={1}>
+                            <Typography variant="body2">Verhandelt</Typography>
+                            <Typography variant="body2" fontWeight={750}>{euro(anbieter.preis)}</Typography>
+                          </Stack>
+                          {prozent(anbieter.rabatt) > 0 && (
+                            <Stack direction="row" justifyContent="space-between" gap={1}>
+                              <Typography variant="body2">Rabatt</Typography>
+                              <Typography variant="body2" color="success.main">− {euro(rabattAbzug(anbieter))}</Typography>
+                            </Stack>
                           )}
-                        </Typography>
+                          <Stack direction="row" justifyContent="space-between" gap={1}>
+                            <Typography variant="body2">Skonto ({prozent(anbieter.skonto)} %)</Typography>
+                            <Typography variant="body2" color="success.main">− {euro(skontoAbzug(anbieter))}</Typography>
+                          </Stack>
+                          <Divider />
+                          <Stack direction="row" justifyContent="space-between" gap={1}>
+                            <Typography fontWeight={850}>Nach Skonto</Typography>
+                            <Typography fontWeight={900} color="primary.main">{euro(betragNachSkonto(anbieter))}</Typography>
+                          </Stack>
+                          <Stack direction="row" justifyContent="space-between" gap={1}>
+                            <Typography variant="body2">Gesamtkosten inkl. Zusatzkosten</Typography>
+                            <Typography variant="body2" fontWeight={900}>{euro(gesamtkosten(anbieter))}</Typography>
+                          </Stack>
+                        </Stack>
                       </Paper>
                     </Box>
                   </Paper>

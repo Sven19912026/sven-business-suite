@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
+  Accordion,
+  AccordionDetails,
+  AccordionSummary,
   Box,
   Button,
   Card,
@@ -70,6 +73,33 @@ import Dokumentablage from "../components/Dokumentablage";
 import { alleDokumenteLoeschen, VERTRAG_DOKUMENT_KATEGORIEN } from "../services/dokumente";
 
 GlobalWorkerOptions.workerSrc = pdfWorker;
+
+const STANDARD_LIEFERANTEN_KATEGORIEN = [
+  "Diesellieferanten",
+  "Baustofflieferanten",
+  "Stahllieferanten",
+  "Elektrolieferanten",
+  "Werkzeuglieferanten",
+  "Maschinenlieferanten",
+  "Fahrzeuglieferanten",
+  "Dienstleister",
+  "Personaldienstleister",
+  "Material",
+  "Maschine",
+  "Fahrzeug",
+  "Dienstleistung",
+  "Personal",
+  "Sonstiges",
+];
+
+function kategorieOptionen(lieferanten = []) {
+  const vorhandene = lieferanten
+    .map((eintrag) => String(eintrag?.kategorie || "").trim())
+    .filter(Boolean);
+
+  return [...new Set([...STANDARD_LIEFERANTEN_KATEGORIEN, ...vorhandene])]
+    .sort((a, b) => a.localeCompare(b, "de"));
+}
 
 const leerLieferant = {
   firma: "",
@@ -216,11 +246,16 @@ function adresseErkennen(text) {
 
 function kategorieErkennen(text) {
   const klein = text.toLowerCase();
-  if (/bagger|radlader|kran|maschine|maschinenbau|baumaschine/.test(klein)) return "Maschine";
-  if (/fahrzeug|autohaus|kfz|lkw|pkw|transporter|fuhrpark/.test(klein)) return "Fahrzeug";
-  if (/personal|zeitarbeit|arbeitnehmerüberlassung|recruiting/.test(klein)) return "Personal";
-  if (/dienstleistung|beratung|service|wartung|software|versicherung|miete|leasing/.test(klein)) return "Dienstleistung";
-  if (/material|baustoff|stahl|beton|holz|elektro|werkzeug|lieferung|waren/.test(klein)) return "Material";
+  if (/diesel|kraftstoff|tankkarte|heizöl|tankstelle/.test(klein)) return "Diesellieferanten";
+  if (/baustoff|beton|zement|kies|sand|schotter/.test(klein)) return "Baustofflieferanten";
+  if (/stahl|edelstahl|rohr|metallhandel/.test(klein)) return "Stahllieferanten";
+  if (/elektro|kabel|schaltschrank|elektrik/.test(klein)) return "Elektrolieferanten";
+  if (/werkzeug|befestigung|schraube|bohrer/.test(klein)) return "Werkzeuglieferanten";
+  if (/bagger|radlader|kran|maschine|maschinenbau|baumaschine/.test(klein)) return "Maschinenlieferanten";
+  if (/fahrzeug|autohaus|kfz|lkw|pkw|transporter|fuhrpark/.test(klein)) return "Fahrzeuglieferanten";
+  if (/personal|zeitarbeit|arbeitnehmerüberlassung|recruiting/.test(klein)) return "Personaldienstleister";
+  if (/dienstleistung|beratung|service|wartung|software|versicherung|miete|leasing/.test(klein)) return "Dienstleister";
+  if (/material|holz|lieferung|waren/.test(klein)) return "Material";
   return "Sonstiges";
 }
 
@@ -551,6 +586,7 @@ export default function CRM({ onOpenNegotiation }) {
   const [detailTab, setDetailTab] = useState(0);
   const [suche, setSuche] = useState("");
   const [statusFilter, setStatusFilter] = useState("Alle");
+  const [kategorieFilter, setKategorieFilter] = useState("Alle");
   const [fehler, setFehler] = useState("");
   const [speichert, setSpeichert] = useState(false);
 
@@ -624,17 +660,34 @@ export default function CRM({ onOpenNegotiation }) {
     if (aktuell) setAuswahl(aktuell);
   }, [lieferanten, auswahl?.id]);
 
+  const lieferantenKategorien = useMemo(() => kategorieOptionen(lieferanten), [lieferanten]);
+
   const gefiltert = useMemo(() => {
     const term = suche.trim().toLowerCase();
     return [...lieferanten]
       .filter((x) => statusFilter === "Alle" || x.status === statusFilter)
+      .filter((x) => kategorieFilter === "Alle" || (x.kategorie || "Sonstiges") === kategorieFilter)
       .filter((x) => {
         if (!term) return true;
         return [x.firma, x.kategorie, x.ort, x.kundennummer, x.email, x.notizen]
           .some((v) => String(v || "").toLowerCase().includes(term));
       })
       .sort(sortByName);
-  }, [lieferanten, suche, statusFilter]);
+  }, [lieferanten, suche, statusFilter, kategorieFilter]);
+
+  const lieferantenNachKategorie = useMemo(() => {
+    const gruppen = new Map();
+
+    gefiltert.forEach((lieferant) => {
+      const kategorie = String(lieferant.kategorie || "Sonstiges").trim() || "Sonstiges";
+      if (!gruppen.has(kategorie)) gruppen.set(kategorie, []);
+      gruppen.get(kategorie).push(lieferant);
+    });
+
+    return [...gruppen.entries()]
+      .map(([kategorie, eintraege]) => ({ kategorie, eintraege: eintraege.sort(sortByName) }))
+      .sort((a, b) => a.kategorie.localeCompare(b.kategorie, "de"));
+  }, [gefiltert]);
 
   const offeneAufgaben = aufgaben.filter((x) => x.status !== "Erledigt");
   const faelligeAufgaben = offeneAufgaben.filter((x) => x.faelligAm && x.faelligAm <= heute());
@@ -729,6 +782,8 @@ export default function CRM({ onOpenNegotiation }) {
       if (lieferantId) {
         await updateDoc(doc(db, "lieferanten", lieferantId), {
           ...lieferantForm,
+          firma: lieferantForm.firma.trim(),
+          kategorie: String(lieferantForm.kategorie || "").trim() || "Sonstiges",
           userId: user.uid,
           aktualisiertAm: serverTimestamp(),
         });
@@ -736,6 +791,8 @@ export default function CRM({ onOpenNegotiation }) {
       } else {
         const ref = await addDoc(collection(db, "lieferanten"), {
           ...lieferantForm,
+          firma: lieferantForm.firma.trim(),
+          kategorie: String(lieferantForm.kategorie || "").trim() || "Sonstiges",
           userId: user.uid,
           erstelltAm: serverTimestamp(),
           aktualisiertAm: serverTimestamp(),
@@ -1091,6 +1148,7 @@ delete vertragsFormularDaten._sourceCollection;
       const lieferantDaten = {
         ...importLieferant,
         firma: importLieferant.firma.trim(),
+        kategorie: String(importLieferant.kategorie || "").trim() || "Sonstiges",
         userId: user.uid,
         aktualisiertAm: serverTimestamp(),
       };
@@ -1413,7 +1471,7 @@ delete vertragsFormularDaten._sourceCollection;
           </Stack>
         )}
 
-        <LieferantDialog open={lieferantDialog} onClose={() => setLieferantDialog(false)} form={lieferantForm} setForm={setLieferantForm} onSave={lieferantSpeichern} editing={Boolean(lieferantId)} saving={speichert} />
+        <LieferantDialog open={lieferantDialog} onClose={() => setLieferantDialog(false)} form={lieferantForm} setForm={setLieferantForm} onSave={lieferantSpeichern} editing={Boolean(lieferantId)} saving={speichert} categoryOptions={lieferantenKategorien} />
         <KontaktDialog open={kontaktDialog} onClose={() => setKontaktDialog(false)} form={kontaktForm} setForm={setKontaktForm} onSave={kontaktSpeichern} editing={Boolean(kontaktId)} saving={speichert} />
         <AufgabeDialog open={aufgabeDialog} onClose={() => setAufgabeDialog(false)} form={aufgabeForm} setForm={setAufgabeForm} onSave={aufgabeSpeichern} editing={Boolean(aufgabeId)} saving={speichert} />
         <VertragDialog open={vertragDialog} onClose={() => setVertragDialog(false)} form={vertragForm} setForm={setVertragForm} onSave={vertragSpeichern} editing={Boolean(vertragId)} saving={speichert} />
@@ -1481,36 +1539,65 @@ delete vertragsFormularDaten._sourceCollection;
 
       <Paper sx={{ p: 2, mb: 3 }}>
         <Grid container spacing={2}>
-          <Grid size={{ xs: 12, md: 8 }}><TextField fullWidth label="Lieferanten suchen" value={suche} onChange={(e) => setSuche(e.target.value)} placeholder="Firma, Ort, Kundennummer, E-Mail oder Notiz" slotProps={{ input: { startAdornment: <InputAdornment position="start"><SearchIcon /></InputAdornment> } }} /></Grid>
-          <Grid size={{ xs: 12, md: 4 }}><TextField select fullWidth label="Status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}><MenuItem value="Alle">Alle</MenuItem><MenuItem value="Aktiv">Aktiv</MenuItem><MenuItem value="Inaktiv">Inaktiv</MenuItem></TextField></Grid>
+          <Grid size={{ xs: 12, md: 6 }}><TextField fullWidth label="Lieferanten suchen" value={suche} onChange={(e) => setSuche(e.target.value)} placeholder="Firma, Kategorie, Ort, Kundennummer, E-Mail oder Notiz" slotProps={{ input: { startAdornment: <InputAdornment position="start"><SearchIcon /></InputAdornment> } }} /></Grid>
+          <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+            <TextField select fullWidth label="Kategorie" value={kategorieFilter} onChange={(e) => setKategorieFilter(e.target.value)}>
+              <MenuItem value="Alle">Alle Kategorien</MenuItem>
+              {lieferantenKategorien.map((kategorie) => <MenuItem key={kategorie} value={kategorie}>{kategorie}</MenuItem>)}
+            </TextField>
+          </Grid>
+          <Grid size={{ xs: 12, sm: 6, md: 3 }}><TextField select fullWidth label="Status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}><MenuItem value="Alle">Alle</MenuItem><MenuItem value="Aktiv">Aktiv</MenuItem><MenuItem value="Inaktiv">Inaktiv</MenuItem></TextField></Grid>
         </Grid>
       </Paper>
 
-      <Grid container spacing={2}>
-        {gefiltert.map((lieferant) => {
-          const offen = aufgaben.filter((a) => a.lieferantId === lieferant.id && a.status !== "Erledigt").length;
-          const anzahlKontakte = kontakte.filter((k) => k.lieferantId === lieferant.id).length;
-          return (
-            <Grid key={lieferant.id} size={{ xs: 12, md: 6, lg: 4 }}>
-              <Card sx={{ height: "100%", cursor: "pointer", transition: "0.2s", "&:hover": { transform: "translateY(-2px)", boxShadow: 4 } }} onClick={() => { setAuswahl(lieferant); setDetailTab(0); }}>
-                <CardContent>
-                  <Stack direction="row" justifyContent="space-between" spacing={1}>
-                    <Box sx={{ minWidth: 0 }}><Typography variant="h6" fontWeight={900}>{lieferant.firma}</Typography><Typography color="text.secondary">{[lieferant.plz, lieferant.ort].filter(Boolean).join(" ") || "Kein Ort"}</Typography></Box>
-                    <Box onClick={(e) => e.stopPropagation()}><Tooltip title="Bearbeiten"><IconButton onClick={() => lieferantBearbeiten(lieferant)}><EditIcon /></IconButton></Tooltip><Tooltip title="Löschen"><IconButton color="error" onClick={() => lieferantLoeschen(lieferant)}><DeleteIcon /></IconButton></Tooltip></Box>
-                  </Stack>
-                  <Stack direction="row" spacing={1} mt={2} flexWrap="wrap" useFlexGap><Chip size="small" label={lieferant.kategorie || "Sonstiges"} /><Chip size="small" label={lieferant.status || "Aktiv"} color={lieferant.status === "Aktiv" ? "success" : "default"} /></Stack>
-                  <Divider sx={{ my: 2 }} />
-                  <Stack direction="row" justifyContent="space-between"><Typography color="text.secondary">Ansprechpartner</Typography><Typography fontWeight={700}>{anzahlKontakte}</Typography></Stack>
-                  <Stack direction="row" justifyContent="space-between"><Typography color="text.secondary">Offene Aufgaben</Typography><Typography fontWeight={700}>{offen}</Typography></Stack>
-                  <Stack direction="row" justifyContent="space-between"><Typography color="text.secondary">Verhandlungen</Typography><Typography fontWeight={700}>{verhandlungen.filter((v) => v.lieferantId === lieferant.id).length}</Typography></Stack>
-                  <Stack direction="row" justifyContent="space-between"><Typography color="text.secondary">Verträge</Typography><Typography fontWeight={700}>{vertraege.filter((v) => v.lieferantId === lieferant.id).length}</Typography></Stack>
-                </CardContent>
-              </Card>
-            </Grid>
-          );
-        })}
-        {gefiltert.length === 0 && <Grid size={{ xs: 12 }}><Alert severity="info">Keine Lieferanten gefunden.</Alert></Grid>}
-      </Grid>
+      {lieferantenNachKategorie.length ? (
+        <Stack spacing={1.5}>
+          {lieferantenNachKategorie.map(({ kategorie, eintraege }) => (
+            <Accordion key={kategorie} defaultExpanded={lieferantenNachKategorie.length <= 5} disableGutters>
+              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                <Stack direction="row" spacing={1.5} alignItems="center" sx={{ width: "100%", pr: 1 }}>
+                  <BusinessIcon color="primary" />
+                  <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+                    <Typography fontWeight={900}>{kategorie}</Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      {eintraege.length} Lieferant{eintraege.length === 1 ? "" : "en"} · {eintraege.filter((lieferant) => lieferant.status === "Aktiv").length} aktiv
+                    </Typography>
+                  </Box>
+                  <Chip size="small" label={eintraege.length} color="primary" variant="outlined" />
+                </Stack>
+              </AccordionSummary>
+              <AccordionDetails>
+                <Grid container spacing={2}>
+                  {eintraege.map((lieferant) => {
+                    const offen = aufgaben.filter((a) => a.lieferantId === lieferant.id && a.status !== "Erledigt").length;
+                    const anzahlKontakte = kontakte.filter((k) => k.lieferantId === lieferant.id).length;
+                    return (
+                      <Grid key={lieferant.id} size={{ xs: 12, md: 6, lg: 4 }}>
+                        <Card sx={{ height: "100%", cursor: "pointer", transition: "0.2s", "&:hover": { transform: "translateY(-2px)", boxShadow: 4 } }} onClick={() => { setAuswahl(lieferant); setDetailTab(0); }}>
+                          <CardContent>
+                            <Stack direction="row" justifyContent="space-between" spacing={1}>
+                              <Box sx={{ minWidth: 0 }}><Typography variant="h6" fontWeight={900}>{lieferant.firma}</Typography><Typography color="text.secondary">{[lieferant.plz, lieferant.ort].filter(Boolean).join(" ") || "Kein Ort"}</Typography></Box>
+                              <Box onClick={(e) => e.stopPropagation()}><Tooltip title="Bearbeiten"><IconButton onClick={() => lieferantBearbeiten(lieferant)}><EditIcon /></IconButton></Tooltip><Tooltip title="Löschen"><IconButton color="error" onClick={() => lieferantLoeschen(lieferant)}><DeleteIcon /></IconButton></Tooltip></Box>
+                            </Stack>
+                            <Stack direction="row" spacing={1} mt={2} flexWrap="wrap" useFlexGap><Chip size="small" label={lieferant.kategorie || "Sonstiges"} /><Chip size="small" label={lieferant.status || "Aktiv"} color={lieferant.status === "Aktiv" ? "success" : "default"} /></Stack>
+                            <Divider sx={{ my: 2 }} />
+                            <Stack direction="row" justifyContent="space-between"><Typography color="text.secondary">Ansprechpartner</Typography><Typography fontWeight={700}>{anzahlKontakte}</Typography></Stack>
+                            <Stack direction="row" justifyContent="space-between"><Typography color="text.secondary">Offene Aufgaben</Typography><Typography fontWeight={700}>{offen}</Typography></Stack>
+                            <Stack direction="row" justifyContent="space-between"><Typography color="text.secondary">Verhandlungen</Typography><Typography fontWeight={700}>{verhandlungen.filter((v) => v.lieferantId === lieferant.id).length}</Typography></Stack>
+                            <Stack direction="row" justifyContent="space-between"><Typography color="text.secondary">Verträge</Typography><Typography fontWeight={700}>{vertraege.filter((v) => v.lieferantId === lieferant.id).length}</Typography></Stack>
+                          </CardContent>
+                        </Card>
+                      </Grid>
+                    );
+                  })}
+                </Grid>
+              </AccordionDetails>
+            </Accordion>
+          ))}
+        </Stack>
+      ) : (
+        <Alert severity="info">Keine Lieferanten gefunden.</Alert>
+      )}
 
       <Dialog open={pdfDialog} onClose={() => setPdfDialog(false)} fullWidth maxWidth="md">
         <DialogTitle>Lieferanten als PDF ausgeben</DialogTitle>
@@ -1547,7 +1634,7 @@ delete vertragsFormularDaten._sourceCollection;
         onSave={importDatenSpeichern}
         saving={speichert}
       />
-      <LieferantDialog open={lieferantDialog} onClose={() => setLieferantDialog(false)} form={lieferantForm} setForm={setLieferantForm} onSave={lieferantSpeichern} editing={Boolean(lieferantId)} saving={speichert} />
+      <LieferantDialog open={lieferantDialog} onClose={() => setLieferantDialog(false)} form={lieferantForm} setForm={setLieferantForm} onSave={lieferantSpeichern} editing={Boolean(lieferantId)} saving={speichert} categoryOptions={lieferantenKategorien} />
     </Box>
   );
 }
@@ -1583,6 +1670,7 @@ function LieferantenImportDialog({
   const supplierChange = (event) => setSupplier((vorher) => ({ ...vorher, [event.target.name]: event.target.value }));
   const contactChange = (event) => setContact((vorher) => ({ ...vorher, [event.target.name]: event.target.value }));
   const hatErgebnis = Boolean(rawText);
+  const categoryOptions = kategorieOptionen(suppliers);
 
   function dateiUebernehmen(datei) {
     if (datei) onFile(datei);
@@ -1677,7 +1765,10 @@ function LieferantenImportDialog({
               <Grid container spacing={2}>
                 <Grid size={{ xs: 12, md: 8 }}><TextField fullWidth required name="firma" label="Firma" value={supplier.firma} onChange={supplierChange} /></Grid>
                 <Grid size={{ xs: 12, md: 4 }}><TextField fullWidth select name="status" label="Status" value={supplier.status} onChange={supplierChange}><MenuItem value="Aktiv">Aktiv</MenuItem><MenuItem value="Inaktiv">Inaktiv</MenuItem></TextField></Grid>
-                <Grid size={{ xs: 12, md: 6 }}><TextField fullWidth select name="kategorie" label="Kategorie" value={supplier.kategorie} onChange={supplierChange}>{["Material", "Maschine", "Fahrzeug", "Dienstleistung", "Personal", "Sonstiges"].map((wert) => <MenuItem key={wert} value={wert}>{wert}</MenuItem>)}</TextField></Grid>
+                <Grid size={{ xs: 12, md: 6 }}>
+                  <TextField fullWidth name="kategorie" label="Kategorie" value={supplier.kategorie} onChange={supplierChange} placeholder="z. B. Diesellieferanten" helperText="Freie Kategorie; vorhandene Kategorien werden vorgeschlagen." inputProps={{ list: "import-lieferanten-kategorien" }} />
+                  <datalist id="import-lieferanten-kategorien">{categoryOptions.map((wert) => <option key={wert} value={wert} />)}</datalist>
+                </Grid>
                 <Grid size={{ xs: 12, md: 6 }}><TextField fullWidth name="kundennummer" label="Kundennummer" value={supplier.kundennummer} onChange={supplierChange} /></Grid>
                 <Grid size={{ xs: 12 }}><TextField fullWidth name="strasse" label="Straße und Hausnummer" value={supplier.strasse} onChange={supplierChange} /></Grid>
                 <Grid size={{ xs: 12, sm: 4 }}><TextField fullWidth name="plz" label="PLZ" value={supplier.plz} onChange={supplierChange} /></Grid>
@@ -1739,10 +1830,38 @@ function LieferantenImportDialog({
   );
 }
 
-function LieferantDialog({ open, onClose, form, setForm, onSave, editing, saving }) {
+function LieferantDialog({ open, onClose, form, setForm, onSave, editing, saving, categoryOptions = [] }) {
   const change = (e) => setForm((prev) => ({ ...prev, [e.target.name]: e.target.value }));
   const field = (name, label, extra = {}) => <TextField fullWidth name={name} label={label} value={form[name] || ""} onChange={change} {...extra} />;
-  return <Dialog open={open} onClose={onClose} fullWidth maxWidth="md"><DialogTitle>{editing ? "Lieferant bearbeiten" : "Neuen Lieferanten anlegen"}</DialogTitle><DialogContent><Grid container spacing={2} mt={0.5}><Grid size={{ xs: 12, md: 8 }}>{field("firma", "Firma", { required: true })}</Grid><Grid size={{ xs: 12, md: 4 }}>{field("status", "Status", { select: true, children: [<MenuItem key="a" value="Aktiv">Aktiv</MenuItem>, <MenuItem key="i" value="Inaktiv">Inaktiv</MenuItem>] })}</Grid><Grid size={{ xs: 12, md: 6 }}>{field("kategorie", "Kategorie", { select: true, children: ["Material", "Maschine", "Fahrzeug", "Dienstleistung", "Personal", "Sonstiges"].map((x) => <MenuItem key={x} value={x}>{x}</MenuItem>) })}</Grid><Grid size={{ xs: 12, md: 6 }}>{field("kundennummer", "Kundennummer")}</Grid><Grid size={{ xs: 12 }}>{field("strasse", "Straße und Hausnummer")}</Grid><Grid size={{ xs: 12, sm: 4 }}>{field("plz", "PLZ")}</Grid><Grid size={{ xs: 12, sm: 8 }}>{field("ort", "Ort")}</Grid><Grid size={{ xs: 12, md: 6 }}>{field("telefon", "Telefon")}</Grid><Grid size={{ xs: 12, md: 6 }}>{field("email", "E-Mail")}</Grid><Grid size={{ xs: 12 }}>{field("website", "Website")}</Grid><Grid size={{ xs: 12, md: 6 }}>{field("zahlungsziel", "Zahlungsziel")}</Grid><Grid size={{ xs: 12, md: 6 }}>{field("skonto", "Skonto")}</Grid><Grid size={{ xs: 12, md: 6 }}>{field("standardrabatt", "Standardrabatt")}</Grid><Grid size={{ xs: 12, md: 6 }}>{field("bonusvereinbarung", "Bonusvereinbarung")}</Grid><Grid size={{ xs: 12 }}>{field("lieferbedingungen", "Lieferbedingungen")}</Grid><Grid size={{ xs: 12 }}>{field("notizen", "Notizen", { multiline: true, minRows: 3 })}</Grid></Grid></DialogContent><DialogActions><Button onClick={onClose}>Abbrechen</Button><Button variant="contained" onClick={onSave} disabled={saving || !form.firma.trim()}>{saving ? "Speichert…" : "Speichern"}</Button></DialogActions></Dialog>;
+  return (
+    <Dialog open={open} onClose={onClose} fullWidth maxWidth="md">
+      <DialogTitle>{editing ? "Lieferant bearbeiten" : "Neuen Lieferanten anlegen"}</DialogTitle>
+      <DialogContent>
+        <Grid container spacing={2} mt={0.5}>
+          <Grid size={{ xs: 12, md: 8 }}>{field("firma", "Firma", { required: true })}</Grid>
+          <Grid size={{ xs: 12, md: 4 }}>{field("status", "Status", { select: true, children: [<MenuItem key="a" value="Aktiv">Aktiv</MenuItem>, <MenuItem key="i" value="Inaktiv">Inaktiv</MenuItem>] })}</Grid>
+          <Grid size={{ xs: 12, md: 6 }}>
+            {field("kategorie", "Kategorie", { placeholder: "z. B. Diesellieferanten", helperText: "Neue Kategorien können frei eingetragen werden.", inputProps: { list: "crm-lieferanten-kategorien" } })}
+            <datalist id="crm-lieferanten-kategorien">{categoryOptions.map((x) => <option key={x} value={x} />)}</datalist>
+          </Grid>
+          <Grid size={{ xs: 12, md: 6 }}>{field("kundennummer", "Kundennummer")}</Grid>
+          <Grid size={{ xs: 12 }}>{field("strasse", "Straße und Hausnummer")}</Grid>
+          <Grid size={{ xs: 12, sm: 4 }}>{field("plz", "PLZ")}</Grid>
+          <Grid size={{ xs: 12, sm: 8 }}>{field("ort", "Ort")}</Grid>
+          <Grid size={{ xs: 12, md: 6 }}>{field("telefon", "Telefon")}</Grid>
+          <Grid size={{ xs: 12, md: 6 }}>{field("email", "E-Mail")}</Grid>
+          <Grid size={{ xs: 12 }}>{field("website", "Website")}</Grid>
+          <Grid size={{ xs: 12, md: 6 }}>{field("zahlungsziel", "Zahlungsziel")}</Grid>
+          <Grid size={{ xs: 12, md: 6 }}>{field("skonto", "Skonto")}</Grid>
+          <Grid size={{ xs: 12, md: 6 }}>{field("standardrabatt", "Standardrabatt")}</Grid>
+          <Grid size={{ xs: 12, md: 6 }}>{field("bonusvereinbarung", "Bonusvereinbarung")}</Grid>
+          <Grid size={{ xs: 12 }}>{field("lieferbedingungen", "Lieferbedingungen")}</Grid>
+          <Grid size={{ xs: 12 }}>{field("notizen", "Notizen", { multiline: true, minRows: 3 })}</Grid>
+        </Grid>
+      </DialogContent>
+      <DialogActions><Button onClick={onClose}>Abbrechen</Button><Button variant="contained" onClick={onSave} disabled={saving || !form.firma.trim()}>{saving ? "Speichert…" : "Speichern"}</Button></DialogActions>
+    </Dialog>
+  );
 }
 
 function VertragDialog({ open, onClose, form, setForm, onSave, editing, saving }) {
