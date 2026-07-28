@@ -2122,56 +2122,129 @@ export default function Verhandlungen({
               </CardContent>
             </Card>
           ) : istMobil ? (
-            <Stack spacing={2}>
+            <Stack spacing={1.5}>
               {gefilterteVerhandlungen.map((eintrag) => (
-                <Card
+                <Accordion
                   key={eintrag.id}
+                  disableGutters
                   variant="outlined"
                   sx={{
-                    borderWidth: 2,
+                    border: "2px solid",
                     borderColor: statusRahmenFarbe(eintrag.status),
+                    borderRadius: "12px !important",
+                    overflow: "hidden",
+                    "&:before": { display: "none" },
                   }}
                 >
-                  <CardContent>
+                  <AccordionSummary
+                    expandIcon={<ExpandMoreIcon />}
+                    sx={{
+                      px: 1.5,
+                      py: 0.25,
+                      "& .MuiAccordionSummary-content": {
+                        my: 1,
+                        minWidth: 0,
+                      },
+                    }}
+                  >
+                    <Box sx={{ minWidth: 0, width: "100%", pr: 1 }}>
+                      <Stack
+                        direction="row"
+                        justifyContent="space-between"
+                        alignItems="flex-start"
+                        spacing={1}
+                      >
+                        <Box sx={{ minWidth: 0, flexGrow: 1 }}>
+                          <Typography variant="h6" fontWeight={800} noWrap>
+                            {eintrag.firma}
+                          </Typography>
+                          <Typography
+                            variant="body2"
+                            color="text.secondary"
+                            noWrap
+                            sx={{ mt: 0.15 }}
+                          >
+                            {eintrag.verhandlungsgegenstand || "Kein Verhandlungsgegenstand"}
+                          </Typography>
+                        </Box>
+                        <Chip
+                          label={statusNormalisieren(eintrag.status)}
+                          color={statusFarbe(eintrag.status)}
+                          size="small"
+                          sx={{ flexShrink: 0 }}
+                        />
+                      </Stack>
+
+                      <Stack
+                        direction="row"
+                        justifyContent="space-between"
+                        alignItems="center"
+                        spacing={1}
+                        sx={{ mt: 0.75 }}
+                      >
+                        <Typography variant="caption" color="text.secondary" noWrap>
+                          Für {eintrag.auftraggeberName || "keine Firma zugeordnet"}
+                        </Typography>
+                        <Typography
+                          variant="body2"
+                          color="success.main"
+                          fontWeight={800}
+                          sx={{ flexShrink: 0 }}
+                        >
+                          {euroFormat(einsparung(eintrag))}
+                        </Typography>
+                      </Stack>
+                    </Box>
+                  </AccordionSummary>
+
+                  <AccordionDetails sx={{ px: 1.5, pt: 0, pb: 1.5 }}>
+                    <Divider sx={{ mb: 1.5 }} />
+
                     <Stack
                       direction="row"
-                      justifyContent="space-between"
-                      spacing={1}
+                      justifyContent="flex-end"
+                      spacing={0.5}
+                      sx={{ mb: 1 }}
                     >
-                      <Box sx={{ minWidth: 0 }}>
-                        <Typography variant="h6" fontWeight={800}>
-                          {eintrag.firma}
-                        </Typography>
-                        <Typography color="text.secondary">
-                          {eintrag.ansprechpartner || "Kein Ansprechpartner"}
-                        </Typography>
-                        <Typography variant="caption" color="text.secondary">Für {eintrag.auftraggeberName || "keine Firma zugeordnet"} · Verhandlungstag: {datumFormat(eintrag.verhandlungstag)}</Typography>
-                      </Box>
-                      <Box sx={{ whiteSpace: "nowrap" }}>
-                        <Tooltip title="Ersparnis berechnen">
-                          <IconButton onClick={() => eintragRechnerOeffnen(eintrag)}>
-                            <CalculateIcon />
-                          </IconButton>
-                        </Tooltip>
+                      <Tooltip title="Ersparnis berechnen">
                         <IconButton
+                          size="small"
+                          onClick={() => eintragRechnerOeffnen(eintrag)}
+                        >
+                          <CalculateIcon />
+                        </IconButton>
+                      </Tooltip>
+                      <Tooltip title="Bearbeiten">
+                        <IconButton
+                          size="small"
                           onClick={() => verhandlungBearbeitenOeffnen(eintrag)}
                         >
                           <EditIcon />
                         </IconButton>
+                      </Tooltip>
+                      <Tooltip title="Löschen">
                         <IconButton
+                          size="small"
                           color="error"
                           onClick={() => verhandlungLoeschen(eintrag)}
                         >
                           <DeleteIcon />
                         </IconButton>
-                      </Box>
+                      </Tooltip>
                     </Stack>
+
+                    <Typography color="text.secondary">
+                      {eintrag.ansprechpartner || "Kein Ansprechpartner"}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      Verhandlungstag: {datumFormat(eintrag.verhandlungstag)}
+                    </Typography>
 
                     <Paper
                       variant="outlined"
                       sx={{
                         p: 1.5,
-                        mt: 2,
+                        mt: 1.5,
                         bgcolor: "action.hover",
                         borderColor: "divider",
                       }}
@@ -2193,10 +2266,17 @@ export default function Verhandlungen({
 
                     {eintrag.notizen && (
                       <Paper variant="outlined" sx={{ p: 1.5, mt: 1.5 }}>
-                        <Typography variant="caption" color="text.secondary" fontWeight={700}>
+                        <Typography
+                          variant="caption"
+                          color="text.secondary"
+                          fontWeight={700}
+                        >
                           Notizen
                         </Typography>
-                        <RichTextContent value={eintrag.notizen} sx={{ mt: 0.25, fontSize: '0.875rem' }} />
+                        <RichTextContent
+                          value={eintrag.notizen}
+                          sx={{ mt: 0.25, fontSize: "0.875rem" }}
+                        />
                       </Paper>
                     )}
 
@@ -2207,11 +2287,6 @@ export default function Verhandlungen({
                       mt={2}
                       useFlexGap
                     >
-                      <Chip
-                        label={statusNormalisieren(eintrag.status)}
-                        color={statusFarbe(eintrag.status)}
-                        size="small"
-                      />
                       <Chip
                         label={`Priorität: ${eintrag.prioritaet}`}
                         color={prioritaetsFarbe(eintrag.prioritaet)}
@@ -2256,7 +2331,11 @@ export default function Verhandlungen({
                         <Typography fontWeight={800} color="success.main">
                           {euroFormat(einsparung(eintrag))}
                         </Typography>
-                        <Typography variant="caption" color="success.main" fontWeight={700}>
+                        <Typography
+                          variant="caption"
+                          color="success.main"
+                          fontWeight={700}
+                        >
                           {prozentFormat(einsparungProzent(eintrag))}
                         </Typography>
                       </Grid>
@@ -2278,8 +2357,8 @@ export default function Verhandlungen({
                         </Typography>
                       </Grid>
                     </Grid>
-                  </CardContent>
-                </Card>
+                  </AccordionDetails>
+                </Accordion>
               ))}
             </Stack>
           ) : (
