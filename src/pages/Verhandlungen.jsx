@@ -430,7 +430,7 @@ function einsparung(eintrag) {
   );
 }
 function statusNormalisieren(status) {
-  if (status === "Gewonnen") {
+  if (status === "Gewonnen" || status === "Verloren") {
     return "Abgeschlossen";
   }
 
@@ -438,14 +438,14 @@ function statusNormalisieren(status) {
 }
 
 function statusIstAbgeschlossen(status) {
-  return status === "Abgeschlossen" || status === "Gewonnen";
+  return statusNormalisieren(status) === "Abgeschlossen";
 }
 
 function statusRahmenFarbe(status) {
   const normalisiert = statusNormalisieren(status);
   if (normalisiert === "Abgeschlossen") return "success.main";
   if (normalisiert === "In Verhandlung") return "warning.main";
-  if (normalisiert === "Offen" || normalisiert === "Verloren") return "error.main";
+  if (normalisiert === "Offen") return "error.main";
   return "divider";
 }
 
@@ -514,6 +514,8 @@ export default function Verhandlungen({
   const [ansicht, setAnsicht] = useState("verhandlungen");
   const initialNegotiationOpenedRef = useRef("");
   const initialisierteDokumentFristenRef = useRef(new Set());
+  const verhandlungenListeRef = useRef(null);
+  const verhandlungenArchivRef = useRef(null);
 
   const [verhandlungen, setVerhandlungen] = useState([]);
   const [verhandlungsFormular, setVerhandlungsFormular] = useState(
@@ -542,6 +544,8 @@ export default function Verhandlungen({
   const [auftraggeberFilter, setAuftraggeberFilter] = useState("Alle");
   const [sortierung, setSortierung] = useState("firma");
   const [sortRichtung, setSortRichtung] = useState("asc");
+  const [verhandlungenArchivAufgeklappt, setVerhandlungenArchivAufgeklappt] =
+    useState(false);
 
   const [lieferantenSuche, setLieferantenSuche] = useState("");
   const [lieferantenKategorieFilter, setLieferantenKategorieFilter] =
@@ -687,14 +691,18 @@ export default function Verhandlungen({
   }, [verhandlungen]);
 
   const kennzahlen = useMemo(() => {
-    const offen = verhandlungen.filter(
-      (eintrag) =>
-        eintrag.status === "Offen" || eintrag.status === "In Verhandlung"
-    ).length;
+    const aktiveVerhandlungen = verhandlungen.filter(
+      (eintrag) => eintrag.angeliefert !== true
+    );
 
-    const abgeschlossen = verhandlungen.filter(
-  (eintrag) => statusIstAbgeschlossen(eintrag.status)
-).length;
+    const offen = aktiveVerhandlungen.filter((eintrag) => {
+      const status = statusNormalisieren(eintrag.status);
+      return status === "Offen" || status === "In Verhandlung";
+    }).length;
+
+    const abgeschlossen = aktiveVerhandlungen.filter((eintrag) =>
+      statusIstAbgeschlossen(eintrag.status)
+    ).length;
 
     const gesamtEinsparung = verhandlungen.reduce(
       (summe, eintrag) => summe + einsparung(eintrag),
@@ -706,12 +714,11 @@ export default function Verhandlungen({
       return summe + (ausgang > 0 ? ausgang : 0);
     }, 0);
 
-    const faellig = verhandlungen.filter(
+    const faellig = aktiveVerhandlungen.filter(
       (eintrag) =>
         eintrag.wiedervorlage &&
         eintrag.wiedervorlage <= heuteText() &&
-        !statusIstAbgeschlossen(eintrag.status) &&
-eintrag.status !== "Verloren"
+        !statusIstAbgeschlossen(eintrag.status)
     ).length;
 
     return {
@@ -723,13 +730,17 @@ eintrag.status !== "Verloren"
 };
   }, [verhandlungen]);
 
-  const gefilterteVerhandlungen = useMemo(() => {
+  const gefilterteVerhandlungenAlle = useMemo(() => {
     const suchbegriff = suche.trim().toLowerCase();
 
     const gefiltert = verhandlungen.filter((eintrag) => {
+      const normalisierterStatus = statusNormalisieren(eintrag.status);
       const passtStatus =
-  statusFilter === "Alle" ||
-  statusNormalisieren(eintrag.status) === statusFilter;
+        statusFilter === "Alle" ||
+        (statusFilter === "Aktiv" &&
+          (normalisierterStatus === "Offen" ||
+            normalisierterStatus === "In Verhandlung")) ||
+        normalisierterStatus === statusFilter;
       const passtPrioritaet =
         prioritaetFilter === "Alle" ||
         eintrag.prioritaet === prioritaetFilter;
@@ -781,6 +792,27 @@ eintrag.status !== "Verloren"
     sortierung,
     sortRichtung,
   ]);
+
+  const gefilterteVerhandlungen = useMemo(
+    () =>
+      gefilterteVerhandlungenAlle.filter(
+        (eintrag) => eintrag.angeliefert !== true
+      ),
+    [gefilterteVerhandlungenAlle]
+  );
+
+  const gefilterteArchivVerhandlungen = useMemo(
+    () =>
+      gefilterteVerhandlungenAlle.filter(
+        (eintrag) => eintrag.angeliefert === true
+      ),
+    [gefilterteVerhandlungenAlle]
+  );
+
+  const archivVerhandlungenGesamt = useMemo(
+    () => verhandlungen.filter((eintrag) => eintrag.angeliefert === true).length,
+    [verhandlungen]
+  );
 
   const gefilterteLieferanten = useMemo(() => {
     const suchbegriff = lieferantenSuche.trim().toLowerCase();
@@ -1141,6 +1173,17 @@ eintrag.status !== "Verloren"
       setVerhandlungsDialogOffen(false);
       setVerhandlungsFormular(leerVerhandlungsFormular);
       setVerhandlungsBearbeitungsId(null);
+
+      if (daten.angeliefert) {
+        setStatusFilter("Alle");
+        setVerhandlungenArchivAufgeklappt(true);
+        window.setTimeout(() => {
+          verhandlungenArchivRef.current?.scrollIntoView({
+            behavior: "smooth",
+            block: "start",
+          });
+        }, 250);
+      }
     } catch (error) {
       console.error(error);
       setFehler("Speichern fehlgeschlagen. Bitte Firestore-Regeln prüfen.");
@@ -1544,14 +1587,13 @@ eintrag.status !== "Verloren"
 
   const uebergabeVerhandlungen = useMemo(() => {
     const offen = verhandlungen
-      .filter((eintrag) => eintrag.status === "Offen" || eintrag.status === "In Verhandlung")
+      .filter((eintrag) => {
+        const status = statusNormalisieren(eintrag.status);
+        return status === "Offen" || status === "In Verhandlung";
+      })
       .sort((a, b) => String(a.wiedervorlage || "9999-12-31").localeCompare(String(b.wiedervorlage || "9999-12-31")));
     const erledigt = verhandlungen
-      .filter(
-  (eintrag) =>
-    statusIstAbgeschlossen(eintrag.status) ||
-    eintrag.status === "Verloren"
-)
+      .filter((eintrag) => statusIstAbgeschlossen(eintrag.status))
       .sort((a, b) => (b.aktualisiertAm?.seconds || b.erstelltAm?.seconds || 0) - (a.aktualisiertAm?.seconds || a.erstelltAm?.seconds || 0))
       .slice(0, 10);
     return [...offen, ...erledigt];
@@ -1636,10 +1678,26 @@ eintrag.status !== "Verloren"
     window.setTimeout(() => iframe.remove(), 60000);
   }
 
+  function zuVerhandlungenSpringen(filter) {
+    setAnsicht("verhandlungen");
+    setSuche("");
+    setAuftraggeberFilter("Alle");
+    setPrioritaetFilter("Alle");
+    setStatusFilter(filter);
+    setVerhandlungenArchivAufgeklappt(false);
+
+    window.setTimeout(() => {
+      verhandlungenListeRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    }, 50);
+  }
+
   function statusFarbe(status) {
     const normalisiert = statusNormalisieren(status);
     if (normalisiert === "Abgeschlossen" || normalisiert === "Geliefert") return "success";
-    if (normalisiert === "Offen" || normalisiert === "Verloren" || normalisiert === "Abgebrochen") return "error";
+    if (normalisiert === "Offen" || normalisiert === "Abgebrochen") return "error";
     if (normalisiert === "In Verhandlung" || normalisiert === "Bestellt") return "warning";
     return "info";
   }
@@ -1649,12 +1707,14 @@ eintrag.status !== "Verloren"
       titel: "Offene Verhandlungen",
       wert: kennzahlen.offen,
       icon: <HandshakeIcon fontSize="large" />,
+      onClick: () => zuVerhandlungenSpringen("Aktiv"),
     },
     {
-  titel: "Abgeschlossen",
-  wert: kennzahlen.abgeschlossen,
-  icon: <EmojiEventsIcon fontSize="large" />,
-},
+      titel: "Abgeschlossen",
+      wert: kennzahlen.abgeschlossen,
+      icon: <EmojiEventsIcon fontSize="large" />,
+      onClick: () => zuVerhandlungenSpringen("Abgeschlossen"),
+    },
     {
       titel: "Gesamte Einsparung",
       wert: euroFormat(kennzahlen.gesamtEinsparung),
@@ -1927,7 +1987,36 @@ eintrag.status !== "Verloren"
           <Grid container spacing={2} mb={3}>
             {karten.map((karte) => (
               <Grid size={{ xs: 12, sm: 6, xl: 3 }} key={karte.titel}>
-                <Card sx={{ height: "100%" }}>
+                <Card
+                  onClick={karte.onClick}
+                  onKeyDown={(event) => {
+                    if (!karte.onClick) return;
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      karte.onClick();
+                    }
+                  }}
+                  role={karte.onClick ? "button" : undefined}
+                  tabIndex={karte.onClick ? 0 : undefined}
+                  sx={{
+                    height: "100%",
+                    cursor: karte.onClick ? "pointer" : "default",
+                    transition: "transform 150ms ease, box-shadow 150ms ease",
+                    "&:hover": karte.onClick
+                      ? {
+                          transform: "translateY(-2px)",
+                          boxShadow: 5,
+                        }
+                      : undefined,
+                    "&:focus-visible": karte.onClick
+                      ? {
+                          outline: "3px solid",
+                          outlineColor: "primary.main",
+                          outlineOffset: 2,
+                        }
+                      : undefined,
+                  }}
+                >
                   <CardContent>
                     <Stack
                       direction="row"
@@ -1992,12 +2081,10 @@ eintrag.status !== "Verloren"
                   onChange={(event) => setStatusFilter(event.target.value)}
                 >
                   <MenuItem value="Alle">Alle</MenuItem>
-                  <MenuItem value="Offen">Offen</MenuItem>
-                  <MenuItem value="In Verhandlung">In Verhandlung</MenuItem>
-                  <MenuItem value="Abgeschlossen">
-  Abgeschlossen
-</MenuItem>
-                  <MenuItem value="Verloren">Verloren</MenuItem>
+                  <MenuItem value="Aktiv">Offen &amp; in Verhandlung</MenuItem>
+                  <MenuItem value="Offen">Nur Offen</MenuItem>
+                  <MenuItem value="In Verhandlung">Nur In Verhandlung</MenuItem>
+                  <MenuItem value="Abgeschlossen">Abgeschlossen</MenuItem>
                 </TextField>
               </Grid>
 
@@ -2018,6 +2105,7 @@ eintrag.status !== "Verloren"
             </Grid>
           </Paper>
 
+          <Box ref={verhandlungenListeRef} sx={{ scrollMarginTop: 24 }}>
           {gefilterteVerhandlungen.length === 0 ? (
             <Card>
               <CardContent>
@@ -2402,6 +2490,104 @@ eintrag.status !== "Verloren"
               </Table>
             </TableContainer>
           )}
+          </Box>
+
+          <Box
+            ref={verhandlungenArchivRef}
+            sx={{ mt: 3, scrollMarginTop: 24 }}
+          >
+            <Accordion
+              disableGutters
+              expanded={verhandlungenArchivAufgeklappt}
+              onChange={(_, aufgeklappt) =>
+                setVerhandlungenArchivAufgeklappt(aufgeklappt)
+              }
+            >
+              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                <Box>
+                  <Typography fontWeight={850}>
+                    Archiv / angeliefert ({archivVerhandlungenGesamt})
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Verhandlungen werden hierher verschoben, sobald „Angeliefert“ gesetzt ist.
+                  </Typography>
+                </Box>
+              </AccordionSummary>
+              <AccordionDetails>
+                {gefilterteArchivVerhandlungen.length === 0 ? (
+                  <Alert severity="info">
+                    Keine angelieferten Verhandlungen für die aktuellen Filter gefunden.
+                  </Alert>
+                ) : (
+                  <Stack spacing={1.5}>
+                    {gefilterteArchivVerhandlungen.map((eintrag) => (
+                      <Paper
+                        key={eintrag.id}
+                        variant="outlined"
+                        sx={{
+                          p: 2,
+                          borderWidth: 2,
+                          borderColor: "success.main",
+                        }}
+                      >
+                        <Stack
+                          direction={{ xs: "column", md: "row" }}
+                          justifyContent="space-between"
+                          alignItems={{ xs: "stretch", md: "center" }}
+                          spacing={2}
+                        >
+                          <Box sx={{ minWidth: 0, flexGrow: 1 }}>
+                            <Stack
+                              direction="row"
+                              spacing={1}
+                              alignItems="center"
+                              flexWrap="wrap"
+                              useFlexGap
+                            >
+                              <Typography fontWeight={850}>
+                                {eintrag.firma}
+                              </Typography>
+                              <Chip
+                                size="small"
+                                label={statusNormalisieren(eintrag.status)}
+                                color={statusFarbe(eintrag.status)}
+                              />
+                              <LieferstatusChip angeliefert />
+                            </Stack>
+                            <Typography sx={{ mt: 0.75 }} fontWeight={700}>
+                              {eintrag.verhandlungsgegenstand || "Kein Verhandlungsgegenstand"}
+                            </Typography>
+                            <Typography variant="body2" color="text.secondary">
+                              Für {eintrag.auftraggeberName || "keine Firma zugeordnet"}
+                              {" · "}Liefertermin: {lieferterminAnzeige(eintrag)}
+                              {" · "}Einsparung: {euroFormat(einsparung(eintrag))}
+                            </Typography>
+                          </Box>
+                          <Stack direction="row" spacing={0.5} justifyContent="flex-end">
+                            <Tooltip title="Bearbeiten / aus Archiv zurückholen">
+                              <IconButton
+                                onClick={() => verhandlungBearbeitenOeffnen(eintrag)}
+                              >
+                                <EditIcon />
+                              </IconButton>
+                            </Tooltip>
+                            <Tooltip title="Löschen">
+                              <IconButton
+                                color="error"
+                                onClick={() => verhandlungLoeschen(eintrag)}
+                              >
+                                <DeleteIcon />
+                              </IconButton>
+                            </Tooltip>
+                          </Stack>
+                        </Stack>
+                      </Paper>
+                    ))}
+                  </Stack>
+                )}
+              </AccordionDetails>
+            </Accordion>
+          </Box>
         </>
       ) : (
         <>
@@ -2861,10 +3047,7 @@ eintrag.status !== "Verloren"
               >
                 <MenuItem value="Offen">Offen</MenuItem>
                 <MenuItem value="In Verhandlung">In Verhandlung</MenuItem>
-                <MenuItem value="Abgeschlossen">
-  Abgeschlossen
-</MenuItem>
-                <MenuItem value="Verloren">Verloren</MenuItem>
+                <MenuItem value="Abgeschlossen">Abgeschlossen</MenuItem>
               </TextField>
             </Grid>
             <Grid size={{ xs: 12, md: 4 }}>
