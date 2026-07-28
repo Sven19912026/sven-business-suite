@@ -168,9 +168,16 @@ function statusIstAbgeschlossen(status) {
 
 function statusFarbe(status) {
   if (statusIstAbgeschlossen(status)) return "success";
-  if (status === "Verloren") return "error";
-  if (status === "In Verhandlung") return "warning";
+  if (status === "Offen" || status === "Verloren") return "error";
+  if (status === "In Verhandlung" || status === "In Prüfung") return "warning";
   return "info";
+}
+
+function statusRahmenFarbe(status) {
+  if (statusIstAbgeschlossen(status)) return "success.main";
+  if (status === "In Verhandlung" || status === "In Prüfung") return "warning.main";
+  if (!status || status === "Offen" || status === "Verloren") return "error.main";
+  return "divider";
 }
 
 export default function VerhandlungenWettbewerb() {
@@ -754,6 +761,10 @@ export default function VerhandlungenWettbewerb() {
                 <Card
                   key={wettbewerb.id}
                   variant="outlined"
+                  sx={{
+                    borderWidth: 2,
+                    borderColor: statusRahmenFarbe(wettbewerb.status),
+                  }}
                 >
                   <CardContent>
                     <Stack
@@ -1104,10 +1115,9 @@ export default function VerhandlungenWettbewerb() {
             : 'Wettbewerb anlegen'}
         </DialogTitle>
 
-        <DialogContent>
+        <DialogContent sx={{ pt: 2.5 }}>
           <Stack
             spacing={2.5}
-            sx={{ pt: 1 }}
           >
             <Box
               sx={{
@@ -1145,9 +1155,15 @@ export default function VerhandlungenWettbewerb() {
                   Offen
                 </MenuItem>
 
-                <MenuItem value="In Prüfung">
-                  In Prüfung
+                <MenuItem value="In Verhandlung">
+                  In Verhandlung
                 </MenuItem>
+
+                {formular.status === "In Prüfung" && (
+                  <MenuItem value="In Prüfung">
+                    In Prüfung (Bestandswert)
+                  </MenuItem>
+                )}
 
                 <MenuItem value="Abgeschlossen">
                   Abgeschlossen

@@ -56,6 +56,8 @@ import RemoveCircleOutlineIcon from "@mui/icons-material/RemoveCircleOutlined";
 import PictureAsPdfIcon from "@mui/icons-material/PictureAsPdf";
 import DirectionsCarIcon from "@mui/icons-material/DirectionsCar";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
+import CheckCircleOutlineIcon from "@mui/icons-material/CheckCircleOutline";
+import CancelOutlinedIcon from "@mui/icons-material/CancelOutlined";
 
 import {
   Timestamp,
@@ -125,6 +127,7 @@ const leerVerhandlungsFormular = {
   lieferterminQuartal: "1",
   lieferterminJahr: "",
   liefertermin: "",
+  angeliefert: false,
   wiedervorlage: "",
   notizen: "",
 };
@@ -287,13 +290,52 @@ function lieferterminSortierwert(eintrag, praefix = "liefertermin") {
   return datum || "9999-12-31";
 }
 
-function LieferterminEingabe({ formular, praefix, label, onChange }) {
+function LieferterminEingabe({
+  formular,
+  praefix,
+  label,
+  onChange,
+  statusName = "",
+  onStatusChange,
+}) {
   const art = formular[`${praefix}Art`] || "datum";
 
   return (
     <Grid size={{ xs: 12 }}>
       <Paper variant="outlined" sx={{ p: 2 }}>
-        <Typography fontWeight={800} sx={{ mb: 1.5 }}>{label}</Typography>
+        <Stack
+          direction={{ xs: "column", sm: "row" }}
+          justifyContent="space-between"
+          alignItems={{ xs: "stretch", sm: "center" }}
+          spacing={1}
+          sx={{ mb: 1.5 }}
+        >
+          <Typography fontWeight={800}>{label}</Typography>
+          {statusName && (
+            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+              <Button
+                type="button"
+                size="small"
+                color="success"
+                variant={formular[statusName] === true ? "contained" : "outlined"}
+                startIcon={<CheckCircleOutlineIcon />}
+                onClick={() => onStatusChange?.(true)}
+              >
+                Angeliefert
+              </Button>
+              <Button
+                type="button"
+                size="small"
+                color="error"
+                variant={formular[statusName] === false ? "contained" : "outlined"}
+                startIcon={<CancelOutlinedIcon />}
+                onClick={() => onStatusChange?.(false)}
+              >
+                Noch nicht angeliefert
+              </Button>
+            </Stack>
+          )}
+        </Stack>
         <Grid container spacing={2}>
           <Grid size={{ xs: 12, sm: 4 }}>
             <TextField
@@ -399,6 +441,27 @@ function statusNormalisieren(status) {
 
 function statusIstAbgeschlossen(status) {
   return status === "Abgeschlossen" || status === "Gewonnen";
+}
+
+function statusRahmenFarbe(status) {
+  const normalisiert = statusNormalisieren(status);
+  if (normalisiert === "Abgeschlossen") return "success.main";
+  if (normalisiert === "In Verhandlung") return "warning.main";
+  if (normalisiert === "Offen" || normalisiert === "Verloren") return "error.main";
+  return "divider";
+}
+
+function LieferstatusChip({ angeliefert }) {
+  const istAngeliefert = angeliefert === true;
+  return (
+    <Chip
+      size="small"
+      variant="outlined"
+      color={istAngeliefert ? "success" : "error"}
+      icon={istAngeliefert ? <CheckCircleOutlineIcon /> : <CancelOutlinedIcon />}
+      label={istAngeliefert ? "Angeliefert" : "Noch nicht angeliefert"}
+    />
+  );
 }
 
 function fahrzeugStatusIstGeliefert(status) {
@@ -641,9 +704,6 @@ export default function Verhandlungen({
       return summe + (ausgang > 0 ? ausgang : 0);
     }, 0);
 
-    const gesamtEinsparungProzent =
-      ausgangsVolumen > 0 ? (gesamtEinsparung / ausgangsVolumen) * 100 : 0;
-
     const faellig = verhandlungen.filter(
       (eintrag) =>
         eintrag.wiedervorlage &&
@@ -656,7 +716,6 @@ eintrag.status !== "Verloren"
   offen,
   abgeschlossen,
   gesamtEinsparung,
-  gesamtEinsparungProzent,
   ausgangsVolumen,
   faellig,
 };
@@ -923,6 +982,7 @@ eintrag.status !== "Verloren"
       schmerzgrenze: eintrag.schmerzgrenze ?? "",
       ...lieferterminFormularwerte(eintrag, "liefertermin"),
       liefertermin: eintrag.liefertermin ?? "",
+      angeliefert: eintrag.angeliefert === true,
       wiedervorlage: eintrag.wiedervorlage ?? "",
       notizen: eintrag.notizen ?? "",
     });
@@ -1044,6 +1104,7 @@ eintrag.status !== "Verloren"
         verhandlungsFormular.lieferterminArt === "datum"
           ? verhandlungsFormular.lieferterminDatum
           : "",
+      angeliefert: verhandlungsFormular.angeliefert === true,
       geaendertAm: serverTimestamp(),
     };
 
@@ -1574,9 +1635,10 @@ eintrag.status !== "Verloren"
   }
 
   function statusFarbe(status) {
-    if (status === "Gewonnen" || status === "Geliefert") return "success";
-    if (status === "Verloren" || status === "Abgebrochen") return "error";
-    if (status === "In Verhandlung" || status === "Bestellt") return "warning";
+    const normalisiert = statusNormalisieren(status);
+    if (normalisiert === "Abgeschlossen" || normalisiert === "Geliefert") return "success";
+    if (normalisiert === "Offen" || normalisiert === "Verloren" || normalisiert === "Abgebrochen") return "error";
+    if (normalisiert === "In Verhandlung" || normalisiert === "Bestellt") return "warning";
     return "info";
   }
 
@@ -1594,7 +1656,7 @@ eintrag.status !== "Verloren"
     {
       titel: "Gesamte Einsparung",
       wert: euroFormat(kennzahlen.gesamtEinsparung),
-      zusatz: `${prozentFormat(kennzahlen.gesamtEinsparungProzent)} vom Ausgangsvolumen`,
+      zusatz: `Gesamtvolumen: ${euroFormat(kennzahlen.ausgangsVolumen)}`,
       icon: <SavingsIcon fontSize="large" />,
     },
     {
@@ -1968,7 +2030,14 @@ eintrag.status !== "Verloren"
           ) : istMobil ? (
             <Stack spacing={2}>
               {gefilterteVerhandlungen.map((eintrag) => (
-                <Card key={eintrag.id}>
+                <Card
+                  key={eintrag.id}
+                  variant="outlined"
+                  sx={{
+                    borderWidth: 2,
+                    borderColor: statusRahmenFarbe(eintrag.status),
+                  }}
+                >
                   <CardContent>
                     <Stack
                       direction="row"
@@ -2097,13 +2166,14 @@ eintrag.status !== "Verloren"
                           {prozentFormat(einsparungProzent(eintrag))}
                         </Typography>
                       </Grid>
-                      <Grid size={{ xs: 6 }}>
+                      <Grid size={{ xs: 12, sm: 6 }}>
                         <Typography variant="caption" color="text.secondary">
                           Liefertermin
                         </Typography>
-                        <Typography fontWeight={700}>
+                        <Typography fontWeight={700} sx={{ mb: 0.75 }}>
                           {lieferterminAnzeige(eintrag)}
                         </Typography>
+                        <LieferstatusChip angeliefert={eintrag.angeliefert} />
                       </Grid>
                       <Grid size={{ xs: 6 }}>
                         <Typography variant="caption" color="text.secondary">
@@ -2204,7 +2274,25 @@ eintrag.status !== "Verloren"
                 </TableHead>
                 <TableBody>
                   {gefilterteVerhandlungen.map((eintrag) => (
-                    <TableRow hover key={eintrag.id}>
+                    <TableRow
+                      hover
+                      key={eintrag.id}
+                      sx={{
+                        "& > .MuiTableCell-root": {
+                          borderTop: "2px solid",
+                          borderBottom: "2px solid",
+                          borderColor: statusRahmenFarbe(eintrag.status),
+                        },
+                        "& > .MuiTableCell-root:first-of-type": {
+                          borderLeft: "2px solid",
+                          borderColor: statusRahmenFarbe(eintrag.status),
+                        },
+                        "& > .MuiTableCell-root:last-of-type": {
+                          borderRight: "2px solid",
+                          borderColor: statusRahmenFarbe(eintrag.status),
+                        },
+                      }}
+                    >
                       <TableCell><Typography fontWeight={700}>{eintrag.auftraggeberName || "—"}</Typography></TableCell>
                       <TableCell>{datumFormat(eintrag.verhandlungstag)}</TableCell>
                       <TableCell>
@@ -2272,7 +2360,10 @@ eintrag.status !== "Verloren"
                         </Typography>
                       </TableCell>
                       <TableCell>
-                        {lieferterminAnzeige(eintrag)}
+                        <Typography variant="body2" fontWeight={700} sx={{ mb: 0.5 }}>
+                          {lieferterminAnzeige(eintrag)}
+                        </Typography>
+                        <LieferstatusChip angeliefert={eintrag.angeliefert} />
                       </TableCell>
                       <TableCell>
                         {datumFormat(eintrag.wiedervorlage)}
@@ -2655,8 +2746,8 @@ eintrag.status !== "Verloren"
             ? "Verhandlung bearbeiten"
             : "Neue Verhandlung anlegen"}
         </DialogTitle>
-        <DialogContent>
-          <Grid container spacing={2} mt={0.5}>
+        <DialogContent sx={{ pt: 2.5 }}>
+          <Grid container spacing={2}>
             <Grid size={{ xs: 12, md: 6 }}>
               <TextField select required fullWidth label="Firma, für die verhandelt wird" name="auftraggeberId" value={verhandlungsFormular.auftraggeberId} onChange={verhandlungsFeldAendern} helperText={eigeneFirmen.length ? "Auftraggeber auswählen" : "Bitte zuerst über ‚Firmen verwalten‘ eine Firma anlegen"}>
                 <MenuItem value="">Bitte auswählen</MenuItem>
@@ -2877,6 +2968,10 @@ eintrag.status !== "Verloren"
               praefix="liefertermin"
               label="Liefertermin"
               onChange={verhandlungsFeldAendern}
+              statusName="angeliefert"
+              onStatusChange={(angeliefert) =>
+                setVerhandlungsFormular((vorher) => ({ ...vorher, angeliefert }))
+              }
             />
             <Grid size={{ xs: 12, md: 6 }}>
               <TextField
