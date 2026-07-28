@@ -56,8 +56,6 @@ import RemoveCircleOutlineIcon from "@mui/icons-material/RemoveCircleOutlined";
 import PictureAsPdfIcon from "@mui/icons-material/PictureAsPdf";
 import DirectionsCarIcon from "@mui/icons-material/DirectionsCar";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
-import CheckCircleOutlineIcon from "@mui/icons-material/CheckCircleOutline";
-import CancelOutlinedIcon from "@mui/icons-material/CancelOutlined";
 
 import {
   Timestamp,
@@ -318,7 +316,7 @@ function LieferterminEingabe({
                 size="small"
                 color="success"
                 variant={formular[statusName] === true ? "contained" : "outlined"}
-                startIcon={<CheckCircleOutlineIcon />}
+                startIcon={<Box component="span" aria-hidden="true" sx={{ fontWeight: 900 }}>✓</Box>}
                 onClick={() => onStatusChange?.(true)}
               >
                 Angeliefert
@@ -328,7 +326,7 @@ function LieferterminEingabe({
                 size="small"
                 color="error"
                 variant={formular[statusName] === false ? "contained" : "outlined"}
-                startIcon={<CancelOutlinedIcon />}
+                startIcon={<Box component="span" aria-hidden="true" sx={{ fontWeight: 900 }}>✕</Box>}
                 onClick={() => onStatusChange?.(false)}
               >
                 Noch nicht angeliefert
@@ -458,7 +456,11 @@ function LieferstatusChip({ angeliefert }) {
       size="small"
       variant="outlined"
       color={istAngeliefert ? "success" : "error"}
-      icon={istAngeliefert ? <CheckCircleOutlineIcon /> : <CancelOutlinedIcon />}
+      icon={
+        <Box component="span" aria-hidden="true" sx={{ fontWeight: 900 }}>
+          {istAngeliefert ? "✓" : "✕"}
+        </Box>
+      }
       label={istAngeliefert ? "Angeliefert" : "Noch nicht angeliefert"}
     />
   );
