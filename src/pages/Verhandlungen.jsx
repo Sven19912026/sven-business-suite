@@ -82,6 +82,7 @@ import {
   addiereTage,
   alleDokumenteLoeschen,
   dokumentFristenSynchronisieren,
+  dokumenteCollection,
   istAbgeschlossenerStatus,
   timestampZuDatum,
   verhandlungsFristInitialisieren,
@@ -463,6 +464,71 @@ function LieferstatusChip({ angeliefert }) {
       }
       label={istAngeliefert ? "Angeliefert" : "Noch nicht angeliefert"}
     />
+  );
+}
+
+function istPdfDokument(dokument) {
+  return dokument?.contentType === "application/pdf"
+    || String(dokument?.dateiname || "").toLowerCase().endsWith(".pdf");
+}
+
+function DirektesVerhandlungsPdf({ verhandlungId }) {
+  const [pdfDokument, setPdfDokument] = useState(null);
+
+  useEffect(() => {
+    if (!verhandlungId) {
+      setPdfDokument(null);
+      return undefined;
+    }
+
+    return onSnapshot(
+      dokumenteCollection("verhandlung", verhandlungId),
+      (snapshot) => {
+        const pdfs = snapshot.docs
+          .map((eintrag) => ({ id: eintrag.id, ...eintrag.data() }))
+          .filter((dokument) => istPdfDokument(dokument) && dokument.downloadUrl)
+          .sort((a, b) => {
+            const aZeit = timestampZuDatum(a.erstelltAm)?.getTime() || 0;
+            const bZeit = timestampZuDatum(b.erstelltAm)?.getTime() || 0;
+            return bZeit - aZeit;
+          });
+
+        setPdfDokument(pdfs[0] || null);
+      },
+      () => setPdfDokument(null)
+    );
+  }, [verhandlungId]);
+
+  if (!pdfDokument?.downloadUrl) return null;
+
+  return (
+    <Tooltip title={`PDF öffnen: ${pdfDokument.titel || pdfDokument.dateiname || "Dokument"}`}>
+      <Button
+        component="a"
+        href={pdfDokument.downloadUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        color="error"
+        variant="outlined"
+        size="small"
+        aria-label="PDF der Verhandlung öffnen"
+        onClick={(event) => event.stopPropagation()}
+        onKeyDown={(event) => event.stopPropagation()}
+        sx={{
+          alignSelf: "center",
+          flexShrink: 0,
+          minWidth: 0,
+          mr: 1,
+          px: 0.75,
+          whiteSpace: "nowrap",
+        }}
+      >
+        <PictureAsPdfIcon fontSize="small" />
+        <Box component="span" sx={{ ml: 0.5, display: { xs: "none", sm: "inline" } }}>
+          PDF
+        </Box>
+      </Button>
+    </Tooltip>
   );
 }
 
@@ -2136,18 +2202,21 @@ export default function Verhandlungen({
                     "&:before": { display: "none" },
                   }}
                 >
-                  <AccordionSummary
-                    expandIcon={<ExpandMoreIcon />}
-                    sx={{
-                      px: 1.5,
-                      py: 0.25,
-                      "& .MuiAccordionSummary-content": {
-                        my: 1,
+                  <Box sx={{ display: "flex", alignItems: "stretch", minWidth: 0 }}>
+                    <AccordionSummary
+                      expandIcon={<ExpandMoreIcon />}
+                      sx={{
+                        flexGrow: 1,
                         minWidth: 0,
-                      },
-                    }}
-                  >
-                    <Box sx={{ minWidth: 0, width: "100%", pr: 1 }}>
+                        px: 1.5,
+                        py: 0.25,
+                        "& .MuiAccordionSummary-content": {
+                          my: 1,
+                          minWidth: 0,
+                        },
+                      }}
+                    >
+                      <Box sx={{ minWidth: 0, width: "100%", pr: 1 }}>
                       <Stack
                         direction="row"
                         justifyContent="space-between"
@@ -2194,8 +2263,10 @@ export default function Verhandlungen({
                           {euroFormat(einsparung(eintrag))}
                         </Typography>
                       </Stack>
-                    </Box>
-                  </AccordionSummary>
+                      </Box>
+                    </AccordionSummary>
+                    <DirektesVerhandlungsPdf verhandlungId={eintrag.id} />
+                  </Box>
 
                   <AccordionDetails sx={{ px: 1.5, pt: 0, pb: 1.5 }}>
                     <Divider sx={{ mb: 1.5 }} />
