@@ -1707,13 +1707,13 @@ export default function Verhandlungen({
       titel: "Offene Verhandlungen",
       wert: kennzahlen.offen,
       icon: <HandshakeIcon fontSize="large" />,
-      onClick: () => zuVerhandlungenSpringen("Aktiv"),
+      filter: "Aktiv",
     },
     {
       titel: "Abgeschlossen",
       wert: kennzahlen.abgeschlossen,
       icon: <EmojiEventsIcon fontSize="large" />,
-      onClick: () => zuVerhandlungenSpringen("Abgeschlossen"),
+      filter: "Abgeschlossen",
     },
     {
       titel: "Gesamte Einsparung",
@@ -1988,27 +1988,31 @@ export default function Verhandlungen({
             {karten.map((karte) => (
               <Grid size={{ xs: 12, sm: 6, xl: 3 }} key={karte.titel}>
                 <Card
-                  onClick={karte.onClick}
+                  onClick={
+                    karte.filter
+                      ? () => zuVerhandlungenSpringen(karte.filter)
+                      : undefined
+                  }
                   onKeyDown={(event) => {
-                    if (!karte.onClick) return;
+                    if (!karte.filter) return;
                     if (event.key === "Enter" || event.key === " ") {
                       event.preventDefault();
-                      karte.onClick();
+                      zuVerhandlungenSpringen(karte.filter);
                     }
                   }}
-                  role={karte.onClick ? "button" : undefined}
-                  tabIndex={karte.onClick ? 0 : undefined}
+                  role={karte.filter ? "button" : undefined}
+                  tabIndex={karte.filter ? 0 : undefined}
                   sx={{
                     height: "100%",
-                    cursor: karte.onClick ? "pointer" : "default",
+                    cursor: karte.filter ? "pointer" : "default",
                     transition: "transform 150ms ease, box-shadow 150ms ease",
-                    "&:hover": karte.onClick
+                    "&:hover": karte.filter
                       ? {
                           transform: "translateY(-2px)",
                           boxShadow: 5,
                         }
                       : undefined,
-                    "&:focus-visible": karte.onClick
+                    "&:focus-visible": karte.filter
                       ? {
                           outline: "3px solid",
                           outlineColor: "primary.main",
