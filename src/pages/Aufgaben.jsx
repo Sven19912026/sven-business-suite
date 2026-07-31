@@ -1042,27 +1042,30 @@ export default function Aufgaben() {
                                             </Box>
                                           )}
                                           <Stack direction="row" gap={0.75} flexWrap="wrap" mt={1.25} useFlexGap sx={{ minWidth: 0, alignItems: 'center' }}>
-                                            <TextField
-                                              size="small"
-                                              label="Fällig am"
-                                              type="date"
-                                              value={aufgabe.faelligAm || ''}
-                                              onChange={(event) => aufgabeFaelligkeitAendern(aufgabe, event.target.value)}
-                                              disabled={datumSpeichertId === aufgabe.id}
-                                              InputLabelProps={{ shrink: true }}
-                                              inputProps={{ 'aria-label': `Fälligkeitsdatum für ${aufgabe.titel}` }}
-                                              onDragStart={(event) => event.stopPropagation()}
-                                              sx={{
-                                                width: { xs: 168, sm: 180 },
-                                                maxWidth: '100%',
-                                                '& .MuiInputBase-root': { bgcolor: 'background.paper' },
-                                              }}
-                                            />
                                             <Chip size="small" color={prioritaetsFarbe(aufgabe.prioritaet)} label={aufgabe.prioritaet || 'Mittel'} />
                                             <Chip size="small" variant="outlined" label={kategorie?.name || 'Ohne Kategorie'} sx={{ maxWidth: '100%', '& .MuiChip-label': { overflow: 'hidden', textOverflow: 'ellipsis' } }} />
                                             {ueberfaellig && <Chip size="small" color="error" label="Überfällig" />}
                                           </Stack>
                                         </Box>
+                                        <TextField
+                                          size="small"
+                                          label="Fällig am"
+                                          type="date"
+                                          value={aufgabe.faelligAm || ''}
+                                          onChange={(event) => aufgabeFaelligkeitAendern(aufgabe, event.target.value)}
+                                          disabled={datumSpeichertId === aufgabe.id}
+                                          InputLabelProps={{ shrink: true }}
+                                          inputProps={{ 'aria-label': `Fälligkeitsdatum für ${aufgabe.titel}` }}
+                                          onClick={(event) => event.stopPropagation()}
+                                          onDragStart={(event) => event.stopPropagation()}
+                                          sx={{
+                                            width: { xs: 145, sm: 180 },
+                                            flexShrink: 0,
+                                            alignSelf: 'flex-start',
+                                            ml: 'auto',
+                                            '& .MuiInputBase-root': { bgcolor: 'background.paper' },
+                                          }}
+                                        />
                                         <Tooltip title={aufgabeIstOffen ? 'Aufgabe einklappen' : 'Aufgabe ausklappen'}>
                                           <IconButton
                                             size="small"
