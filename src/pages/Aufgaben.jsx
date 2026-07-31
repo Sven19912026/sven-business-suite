@@ -209,6 +209,7 @@ export default function Aufgaben() {
   const [gezogeneAufgabeId, setGezogeneAufgabeId] = useState('')
   const [dragUeberAufgabeId, setDragUeberAufgabeId] = useState('')
   const [sortierungSpeichert, setSortierungSpeichert] = useState(false)
+  const [datumSpeichertId, setDatumSpeichertId] = useState('')
   const laufendeKategorieBereinigungen = useRef(new Set())
 
   useEffect(() => {
@@ -643,6 +644,23 @@ export default function Aufgaben() {
     } finally { setSpeichert(false) }
   }
 
+  async function aufgabeFaelligkeitAendern(aufgabe, faelligAm) {
+    if (!user || datumSpeichertId === aufgabe.id || (aufgabe.faelligAm || '') === faelligAm) return
+    setDatumSpeichertId(aufgabe.id)
+    setFehler('')
+    try {
+      await updateDoc(doc(db, 'suiteAufgaben', aufgabe.id), {
+        faelligAm,
+        aktualisiertAm: serverTimestamp(),
+      })
+    } catch (error) {
+      console.error(error)
+      setFehler('Fälligkeitsdatum konnte nicht geändert werden.')
+    } finally {
+      setDatumSpeichertId('')
+    }
+  }
+
   async function aufgabeStatusAendern(aufgabe) {
     try {
       const wirdErledigt = !aufgabe.erledigt
@@ -1023,7 +1041,23 @@ export default function Aufgaben() {
                                               />
                                             </Box>
                                           )}
-                                          <Stack direction="row" gap={0.75} flexWrap="wrap" mt={1.25} useFlexGap sx={{ minWidth: 0 }}>
+                                          <Stack direction="row" gap={0.75} flexWrap="wrap" mt={1.25} useFlexGap sx={{ minWidth: 0, alignItems: 'center' }}>
+                                            <TextField
+                                              size="small"
+                                              label="Fällig am"
+                                              type="date"
+                                              value={aufgabe.faelligAm || ''}
+                                              onChange={(event) => aufgabeFaelligkeitAendern(aufgabe, event.target.value)}
+                                              disabled={datumSpeichertId === aufgabe.id}
+                                              InputLabelProps={{ shrink: true }}
+                                              inputProps={{ 'aria-label': `Fälligkeitsdatum für ${aufgabe.titel}` }}
+                                              onDragStart={(event) => event.stopPropagation()}
+                                              sx={{
+                                                width: { xs: 168, sm: 180 },
+                                                maxWidth: '100%',
+                                                '& .MuiInputBase-root': { bgcolor: 'background.paper' },
+                                              }}
+                                            />
                                             <Chip size="small" color={prioritaetsFarbe(aufgabe.prioritaet)} label={aufgabe.prioritaet || 'Mittel'} />
                                             <Chip size="small" variant="outlined" label={kategorie?.name || 'Ohne Kategorie'} sx={{ maxWidth: '100%', '& .MuiChip-label': { overflow: 'hidden', textOverflow: 'ellipsis' } }} />
                                             {ueberfaellig && <Chip size="small" color="error" label="Überfällig" />}
