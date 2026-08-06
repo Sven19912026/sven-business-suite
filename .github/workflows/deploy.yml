@@ -1,4 +1,4 @@
-name: Deploy Business Suite 5.2
+name: Deploy Business Suite 5.5
 
 on:
   push:
@@ -10,12 +10,16 @@ permissions:
   contents: write
 
 concurrency:
-  group: pages-deploy
-  cancel-in-progress: true
+  group: pages-deploy-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      CI: true
 
     steps:
       - name: Repository auschecken
@@ -27,11 +31,23 @@ jobs:
           node-version: 22
           cache: npm
 
-      - name: Abhaengigkeiten installieren
-        run: npm ci
+      - name: npm konfigurieren
+        run: |
+          npm config set registry https://registry.npmjs.org/
+          npm config set fetch-retries 2
+          npm config set fetch-retry-mintimeout 1000
+          npm config set fetch-retry-maxtimeout 10000
+          node --version
+          npm --version
 
-      - name: Qualitaet pruefen und Anwendung bauen
-        run: npm run check
+      - name: Abhaengigkeiten installieren
+        run: timeout 8m npm ci --no-audit --no-fund
+
+      - name: Lint pruefen
+        run: timeout 4m npm run lint
+
+      - name: Anwendung bauen
+        run: timeout 6m npm run build
 
       - name: Nach gh-pages veroeffentlichen
         uses: peaceiris/actions-gh-pages@v4
