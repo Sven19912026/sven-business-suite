@@ -133,6 +133,7 @@ function unteraufgabenNormalisieren(value) {
     .map((unteraufgabe, index) => ({
       id: String(unteraufgabe?.id || `unteraufgabe-${index}`),
       titel: String(unteraufgabe?.titel || '').trim(),
+      notiz: String(unteraufgabe?.notiz || ''),
       erledigt: unteraufgabe?.erledigt === true,
       erstelltAm: unteraufgabe?.erstelltAm || '',
     }))
@@ -230,6 +231,7 @@ export default function Aufgaben() {
   const [sortierungSpeichert, setSortierungSpeichert] = useState(false)
   const [datumSpeichertId, setDatumSpeichertId] = useState('')
   const [unteraufgabeEingaben, setUnteraufgabeEingaben] = useState({})
+  const [unteraufgabeNotizEingaben, setUnteraufgabeNotizEingaben] = useState({})
   const [unteraufgabeSpeichertId, setUnteraufgabeSpeichertId] = useState('')
   const laufendeKategorieBereinigungen = useRef(new Set())
 
@@ -384,7 +386,7 @@ export default function Aufgaben() {
       .filter((item) => {
         if (!term) return true
         const unteraufgabenText = unteraufgabenNormalisieren(item.unteraufgaben)
-          .map((unteraufgabe) => unteraufgabe.titel)
+          .map((unteraufgabe) => `${unteraufgabe.titel} ${unteraufgabe.notiz}`)
           .join(' ')
         return [
           item.titel,
@@ -698,6 +700,7 @@ export default function Aufgaben() {
 
   async function unteraufgabeHinzufuegen(aufgabe) {
     const titel = String(unteraufgabeEingaben[aufgabe.id] || '').trim()
+    const notiz = String(unteraufgabeNotizEingaben[aufgabe.id] || '').trim()
     if (!user || !titel || unteraufgabeSpeichertId === aufgabe.id) return
 
     setUnteraufgabeSpeichertId(aufgabe.id)
@@ -708,6 +711,7 @@ export default function Aufgaben() {
         {
           id: neueUnteraufgabeId(),
           titel,
+          notiz,
           erledigt: false,
           erstelltAm: new Date().toISOString(),
         },
@@ -717,9 +721,38 @@ export default function Aufgaben() {
         aktualisiertAm: serverTimestamp(),
       })
       setUnteraufgabeEingaben((vorher) => ({ ...vorher, [aufgabe.id]: '' }))
+      setUnteraufgabeNotizEingaben((vorher) => ({ ...vorher, [aufgabe.id]: '' }))
     } catch (error) {
       console.error(error)
       setFehler('Unteraufgabe konnte nicht hinzugefügt werden.')
+    } finally {
+      setUnteraufgabeSpeichertId('')
+    }
+  }
+
+  async function unteraufgabeNotizAendern(aufgabe, unteraufgabeId, notiz) {
+    if (!user || unteraufgabeSpeichertId === aufgabe.id) return
+
+    const normalisierteUnteraufgaben = unteraufgabenNormalisieren(aufgabe.unteraufgaben)
+    const aktuelleUnteraufgabe = normalisierteUnteraufgaben.find((unteraufgabe) => unteraufgabe.id === unteraufgabeId)
+    const neueNotiz = String(notiz || '').trim()
+    if (!aktuelleUnteraufgabe || aktuelleUnteraufgabe.notiz === neueNotiz) return
+
+    setUnteraufgabeSpeichertId(aufgabe.id)
+    setFehler('')
+    try {
+      const unteraufgaben = normalisierteUnteraufgaben.map((unteraufgabe) => (
+        unteraufgabe.id === unteraufgabeId
+          ? { ...unteraufgabe, notiz: neueNotiz }
+          : unteraufgabe
+      ))
+      await updateDoc(doc(db, 'suiteAufgaben', aufgabe.id), {
+        unteraufgaben,
+        aktualisiertAm: serverTimestamp(),
+      })
+    } catch (error) {
+      console.error(error)
+      setFehler('Notiz der Unteraufgabe konnte nicht gespeichert werden.')
     } finally {
       setUnteraufgabeSpeichertId('')
     }
@@ -1285,52 +1318,69 @@ export default function Aufgaben() {
                                             {unteraufgaben.length > 0 && (
                                               <Stack spacing={0.5} sx={{ mt: 0.75 }}>
                                                 {unteraufgaben.map((unteraufgabe) => (
-                                                  <Stack
+                                                  <Box
                                                     key={unteraufgabe.id}
-                                                    direction="row"
-                                                    alignItems="center"
-                                                    gap={0.5}
                                                     sx={{
                                                       minWidth: 0,
                                                       px: 0.5,
-                                                      py: 0.25,
+                                                      py: 0.5,
                                                       borderRadius: 1,
                                                       '&:hover': { bgcolor: 'action.hover' },
                                                     }}
                                                   >
-                                                    <Checkbox
-                                                      size="small"
-                                                      checked={unteraufgabe.erledigt}
-                                                      disabled={unteraufgabeSpeichertId === aufgabe.id}
-                                                      onChange={() => unteraufgabeStatusAendern(aufgabe, unteraufgabe.id)}
-                                                      sx={{ p: 0.5, flexShrink: 0 }}
-                                                      inputProps={{ 'aria-label': `Unteraufgabe ${unteraufgabe.titel} erledigt` }}
-                                                    />
-                                                    <Typography
-                                                      variant="body2"
-                                                      sx={{
-                                                        flexGrow: 1,
-                                                        minWidth: 0,
-                                                        overflowWrap: 'anywhere',
-                                                        textDecoration: unteraufgabe.erledigt ? 'line-through' : 'none',
-                                                        color: unteraufgabe.erledigt ? 'text.secondary' : 'text.primary',
-                                                      }}
-                                                    >
-                                                      {unteraufgabe.titel}
-                                                    </Typography>
-                                                    <Tooltip title="Unteraufgabe löschen">
-                                                      <IconButton
+                                                    <Stack direction="row" alignItems="flex-start" gap={0.5}>
+                                                      <Checkbox
                                                         size="small"
-                                                        color="error"
+                                                        checked={unteraufgabe.erledigt}
                                                         disabled={unteraufgabeSpeichertId === aufgabe.id}
-                                                        onClick={() => unteraufgabeLoeschen(aufgabe, unteraufgabe)}
-                                                        aria-label={`Unteraufgabe ${unteraufgabe.titel} löschen`}
-                                                        sx={{ flexShrink: 0 }}
-                                                      >
-                                                        <DeleteIcon fontSize="small" />
-                                                      </IconButton>
-                                                    </Tooltip>
-                                                  </Stack>
+                                                        onChange={() => unteraufgabeStatusAendern(aufgabe, unteraufgabe.id)}
+                                                        sx={{ p: 0.5, flexShrink: 0 }}
+                                                        inputProps={{ 'aria-label': `Unteraufgabe ${unteraufgabe.titel} erledigt` }}
+                                                      />
+                                                      <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+                                                        <Typography
+                                                          variant="body2"
+                                                          sx={{
+                                                            overflowWrap: 'anywhere',
+                                                            textDecoration: unteraufgabe.erledigt ? 'line-through' : 'none',
+                                                            color: unteraufgabe.erledigt ? 'text.secondary' : 'text.primary',
+                                                          }}
+                                                        >
+                                                          {unteraufgabe.titel}
+                                                        </Typography>
+                                                        <TextField
+                                                          key={`${unteraufgabe.id}-${unteraufgabe.notiz}`}
+                                                          size="small"
+                                                          fullWidth
+                                                          multiline
+                                                          minRows={1}
+                                                          maxRows={4}
+                                                          variant="standard"
+                                                          label="Notiz zur Unteraufgabe"
+                                                          defaultValue={unteraufgabe.notiz}
+                                                          disabled={unteraufgabeSpeichertId === aufgabe.id}
+                                                          onBlur={(event) => unteraufgabeNotizAendern(
+                                                            aufgabe,
+                                                            unteraufgabe.id,
+                                                            event.target.value,
+                                                          )}
+                                                          sx={{ mt: 0.35 }}
+                                                        />
+                                                      </Box>
+                                                      <Tooltip title="Unteraufgabe löschen">
+                                                        <IconButton
+                                                          size="small"
+                                                          color="error"
+                                                          disabled={unteraufgabeSpeichertId === aufgabe.id}
+                                                          onClick={() => unteraufgabeLoeschen(aufgabe, unteraufgabe)}
+                                                          aria-label={`Unteraufgabe ${unteraufgabe.titel} löschen`}
+                                                          sx={{ flexShrink: 0 }}
+                                                        >
+                                                          <DeleteIcon fontSize="small" />
+                                                        </IconButton>
+                                                      </Tooltip>
+                                                    </Stack>
+                                                  </Box>
                                                 ))}
                                               </Stack>
                                             )}
@@ -1340,23 +1390,39 @@ export default function Aufgaben() {
                                               alignItems={{ xs: 'stretch', sm: 'center' }}
                                               sx={{ mt: 0.75 }}
                                             >
-                                              <TextField
-                                                size="small"
-                                                fullWidth
-                                                label="Neue Unteraufgabe"
-                                                value={unteraufgabeEingaben[aufgabe.id] || ''}
-                                                disabled={unteraufgabeSpeichertId === aufgabe.id}
-                                                onChange={(event) => setUnteraufgabeEingaben((vorher) => ({
-                                                  ...vorher,
-                                                  [aufgabe.id]: event.target.value,
-                                                }))}
-                                                onKeyDown={(event) => {
-                                                  if (event.key === 'Enter') {
-                                                    event.preventDefault()
-                                                    unteraufgabeHinzufuegen(aufgabe)
-                                                  }
-                                                }}
-                                              />
+                                              <Stack spacing={0.75} sx={{ flexGrow: 1, minWidth: 0 }}>
+                                                <TextField
+                                                  size="small"
+                                                  fullWidth
+                                                  label="Neue Unteraufgabe"
+                                                  value={unteraufgabeEingaben[aufgabe.id] || ''}
+                                                  disabled={unteraufgabeSpeichertId === aufgabe.id}
+                                                  onChange={(event) => setUnteraufgabeEingaben((vorher) => ({
+                                                    ...vorher,
+                                                    [aufgabe.id]: event.target.value,
+                                                  }))}
+                                                  onKeyDown={(event) => {
+                                                    if (event.key === 'Enter') {
+                                                      event.preventDefault()
+                                                      unteraufgabeHinzufuegen(aufgabe)
+                                                    }
+                                                  }}
+                                                />
+                                                <TextField
+                                                  size="small"
+                                                  fullWidth
+                                                  multiline
+                                                  minRows={1}
+                                                  maxRows={4}
+                                                  label="Notiz zur Unteraufgabe (optional)"
+                                                  value={unteraufgabeNotizEingaben[aufgabe.id] || ''}
+                                                  disabled={unteraufgabeSpeichertId === aufgabe.id}
+                                                  onChange={(event) => setUnteraufgabeNotizEingaben((vorher) => ({
+                                                    ...vorher,
+                                                    [aufgabe.id]: event.target.value,
+                                                  }))}
+                                                />
+                                              </Stack>
                                               <Button
                                                 size="small"
                                                 variant="outlined"
