@@ -72,6 +72,7 @@ const LEERE_AUFGABE = {
   wiederholung: 'Keine',
   erledigt: false,
   bereich: '',
+  unteraufgaben: [],
 }
 
 function heuteIso() {
@@ -123,6 +124,24 @@ function naechstesDatum(value, wiederholung) {
   if (wiederholung === 'Jährlich') datum.setFullYear(datum.getFullYear() + 1)
   const offset = datum.getTimezoneOffset()
   return new Date(datum.getTime() - offset * 60000).toISOString().slice(0, 10)
+}
+
+function unteraufgabenNormalisieren(value) {
+  if (!Array.isArray(value)) return []
+
+  return value
+    .map((unteraufgabe, index) => ({
+      id: String(unteraufgabe?.id || `unteraufgabe-${index}`),
+      titel: String(unteraufgabe?.titel || '').trim(),
+      erledigt: unteraufgabe?.erledigt === true,
+      erstelltAm: unteraufgabe?.erstelltAm || '',
+    }))
+    .filter((unteraufgabe) => unteraufgabe.titel)
+}
+
+function neueUnteraufgabeId() {
+  if (typeof globalThis.crypto?.randomUUID === 'function') return globalThis.crypto.randomUUID()
+  return `unteraufgabe-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
 }
 
 function Kennzahl({ icon, label, wert }) {
@@ -210,6 +229,8 @@ export default function Aufgaben() {
   const [dragUeberAufgabeId, setDragUeberAufgabeId] = useState('')
   const [sortierungSpeichert, setSortierungSpeichert] = useState(false)
   const [datumSpeichertId, setDatumSpeichertId] = useState('')
+  const [unteraufgabeEingaben, setUnteraufgabeEingaben] = useState({})
+  const [unteraufgabeSpeichertId, setUnteraufgabeSpeichertId] = useState('')
   const laufendeKategorieBereinigungen = useRef(new Set())
 
   useEffect(() => {
@@ -360,7 +381,19 @@ export default function Aufgaben() {
     return bereichAufgaben
       .filter((item) => filterStatus === 'Alle' || (filterStatus === 'Erledigt' ? item.erledigt : !item.erledigt))
       .filter((item) => filterKategorie === 'Alle' || item.kategorieId === filterKategorie)
-      .filter((item) => !term || [item.titel, richTextToPlainText(item.beschreibung), richTextToPlainText(item.notizen), item.verantwortlich].some((wert) => String(wert || '').toLowerCase().includes(term)))
+      .filter((item) => {
+        if (!term) return true
+        const unteraufgabenText = unteraufgabenNormalisieren(item.unteraufgaben)
+          .map((unteraufgabe) => unteraufgabe.titel)
+          .join(' ')
+        return [
+          item.titel,
+          richTextToPlainText(item.beschreibung),
+          richTextToPlainText(item.notizen),
+          item.verantwortlich,
+          unteraufgabenText,
+        ].some((wert) => String(wert || '').toLowerCase().includes(term))
+      })
   }, [bereichAufgaben, filterKategorie, filterStatus, suche])
 
   const prioritaetsGruppen = useMemo(() => PRIORITAETEN
@@ -601,6 +634,7 @@ export default function Aufgaben() {
       ...aufgabe,
       bereich: aufgabe.bereich || bereich,
       status: aufgabe.erledigt ? 'Erledigt' : (aufgabe.status || 'Offen'),
+      unteraufgaben: unteraufgabenNormalisieren(aufgabe.unteraufgaben),
     })
     setAufgabeDialog(true)
   }
@@ -631,6 +665,7 @@ export default function Aufgaben() {
         beschreibung: cleanRichTextForStorage(aufgabeForm.beschreibung),
         notizen: cleanRichTextForStorage(aufgabeForm.notizen),
         verantwortlich: aufgabeForm.verantwortlich.trim(),
+        unteraufgaben: unteraufgabenNormalisieren(aufgabeForm.unteraufgaben),
         erledigt,
         userId: user.uid,
         aktualisiertAm: serverTimestamp(),
@@ -661,6 +696,79 @@ export default function Aufgaben() {
     }
   }
 
+  async function unteraufgabeHinzufuegen(aufgabe) {
+    const titel = String(unteraufgabeEingaben[aufgabe.id] || '').trim()
+    if (!user || !titel || unteraufgabeSpeichertId === aufgabe.id) return
+
+    setUnteraufgabeSpeichertId(aufgabe.id)
+    setFehler('')
+    try {
+      const unteraufgaben = [
+        ...unteraufgabenNormalisieren(aufgabe.unteraufgaben),
+        {
+          id: neueUnteraufgabeId(),
+          titel,
+          erledigt: false,
+          erstelltAm: new Date().toISOString(),
+        },
+      ]
+      await updateDoc(doc(db, 'suiteAufgaben', aufgabe.id), {
+        unteraufgaben,
+        aktualisiertAm: serverTimestamp(),
+      })
+      setUnteraufgabeEingaben((vorher) => ({ ...vorher, [aufgabe.id]: '' }))
+    } catch (error) {
+      console.error(error)
+      setFehler('Unteraufgabe konnte nicht hinzugefügt werden.')
+    } finally {
+      setUnteraufgabeSpeichertId('')
+    }
+  }
+
+  async function unteraufgabeStatusAendern(aufgabe, unteraufgabeId) {
+    if (!user || unteraufgabeSpeichertId === aufgabe.id) return
+
+    setUnteraufgabeSpeichertId(aufgabe.id)
+    setFehler('')
+    try {
+      const unteraufgaben = unteraufgabenNormalisieren(aufgabe.unteraufgaben).map((unteraufgabe) => (
+        unteraufgabe.id === unteraufgabeId
+          ? { ...unteraufgabe, erledigt: !unteraufgabe.erledigt }
+          : unteraufgabe
+      ))
+      await updateDoc(doc(db, 'suiteAufgaben', aufgabe.id), {
+        unteraufgaben,
+        aktualisiertAm: serverTimestamp(),
+      })
+    } catch (error) {
+      console.error(error)
+      setFehler('Status der Unteraufgabe konnte nicht geändert werden.')
+    } finally {
+      setUnteraufgabeSpeichertId('')
+    }
+  }
+
+  async function unteraufgabeLoeschen(aufgabe, unteraufgabe) {
+    if (!window.confirm(`Unteraufgabe „${unteraufgabe.titel}“ wirklich löschen?`)) return
+    if (!user || unteraufgabeSpeichertId === aufgabe.id) return
+
+    setUnteraufgabeSpeichertId(aufgabe.id)
+    setFehler('')
+    try {
+      const unteraufgaben = unteraufgabenNormalisieren(aufgabe.unteraufgaben)
+        .filter((eintrag) => eintrag.id !== unteraufgabe.id)
+      await updateDoc(doc(db, 'suiteAufgaben', aufgabe.id), {
+        unteraufgaben,
+        aktualisiertAm: serverTimestamp(),
+      })
+    } catch (error) {
+      console.error(error)
+      setFehler('Unteraufgabe konnte nicht gelöscht werden.')
+    } finally {
+      setUnteraufgabeSpeichertId('')
+    }
+  }
+
   async function aufgabeStatusAendern(aufgabe) {
     try {
       const wirdErledigt = !aufgabe.erledigt
@@ -678,6 +786,10 @@ export default function Aufgaben() {
           status: 'Offen',
           bereich: aufgabe.bereich || bereich,
           faelligAm: naechstesDatum(aufgabe.faelligAm, aufgabe.wiederholung),
+          unteraufgaben: unteraufgabenNormalisieren(aufgabe.unteraufgaben).map((unteraufgabe) => ({
+            ...unteraufgabe,
+            erledigt: false,
+          })),
           manuelleReihenfolge: naechsteManuelleReihenfolge(
             aufgabe.prioritaet || 'Mittel',
             aufgabe.bereich || bereich,
@@ -968,6 +1080,8 @@ export default function Aufgaben() {
                                 const istDragZiel = dragUeberAufgabeId === aufgabe.id && !wirdGezogen
                                 const kategorie = kategorien.find((eintrag) => eintrag.id === aufgabe.kategorieId)
                                 const aufgabeIstOffen = offeneAufgaben[aufgabe.id] === true
+                                const unteraufgaben = unteraufgabenNormalisieren(aufgabe.unteraufgaben)
+                                const erledigteUnteraufgaben = unteraufgaben.filter((unteraufgabe) => unteraufgabe.erledigt).length
                                 return (
                                   <Card
                                     key={aufgabe.id}
@@ -990,7 +1104,21 @@ export default function Aufgaben() {
                                     }}
                                   >
                                     <CardContent sx={{ p: { xs: 1.25, sm: 2 }, '&:last-child': { pb: { xs: 1.25, sm: 2 } } }}>
-                                      <Stack direction="row" gap={{ xs: 0.5, sm: 1 }} alignItems="flex-start" sx={{ minWidth: 0 }}>
+                                      <Box
+                                        sx={{
+                                          display: 'grid',
+                                          gridTemplateColumns: {
+                                            xs: 'auto minmax(0, 1fr)',
+                                            sm: manuelleSortierung
+                                              ? 'auto auto minmax(0, 1fr) auto'
+                                              : 'auto minmax(0, 1fr) auto',
+                                          },
+                                          columnGap: { xs: 0.5, sm: 1 },
+                                          rowGap: 0.75,
+                                          alignItems: 'flex-start',
+                                          minWidth: 0,
+                                        }}
+                                      >
                                         {manuelleSortierung && (
                                           <Tooltip title="Zum Sortieren ziehen">
                                             <Box
@@ -1045,9 +1173,56 @@ export default function Aufgaben() {
                                             <Chip size="small" color={prioritaetsFarbe(aufgabe.prioritaet)} label={aufgabe.prioritaet || 'Mittel'} />
                                             <Chip size="small" variant="outlined" label={kategorie?.name || 'Ohne Kategorie'} sx={{ maxWidth: '100%', '& .MuiChip-label': { overflow: 'hidden', textOverflow: 'ellipsis' } }} />
                                             {ueberfaellig && <Chip size="small" color="error" label="Überfällig" />}
+                                            {unteraufgaben.length > 0 && (
+                                              <Chip
+                                                size="small"
+                                                variant="outlined"
+                                                label={`Unteraufgaben: ${erledigteUnteraufgaben}/${unteraufgaben.length}`}
+                                              />
+                                            )}
                                           </Stack>
                                         </Box>
-                                        <TextField
+                                        <Stack
+                                          direction="row"
+                                          alignItems="flex-start"
+                                          justifyContent="flex-end"
+                                          gap={0.25}
+                                          sx={{
+                                            gridColumn: { xs: '1 / -1', sm: 'auto' },
+                                            minWidth: 0,
+                                            ml: 'auto',
+                                          }}
+                                        >
+                                          <Tooltip title="Aufgabe bearbeiten">
+                                            <IconButton
+                                              size="small"
+                                              onClick={(event) => {
+                                                event.stopPropagation()
+                                                aufgabeBearbeiten(aufgabe)
+                                              }}
+                                              onDragStart={(event) => event.stopPropagation()}
+                                              aria-label={`Aufgabe ${aufgabe.titel} bearbeiten`}
+                                              sx={{ flexShrink: 0 }}
+                                            >
+                                              <EditIcon fontSize="small" />
+                                            </IconButton>
+                                          </Tooltip>
+                                          <Tooltip title="Aufgabe löschen">
+                                            <IconButton
+                                              size="small"
+                                              color="error"
+                                              onClick={(event) => {
+                                                event.stopPropagation()
+                                                aufgabeLoeschen(aufgabe)
+                                              }}
+                                              onDragStart={(event) => event.stopPropagation()}
+                                              aria-label={`Aufgabe ${aufgabe.titel} löschen`}
+                                              sx={{ flexShrink: 0 }}
+                                            >
+                                              <DeleteIcon fontSize="small" />
+                                            </IconButton>
+                                          </Tooltip>
+                                          <TextField
                                           size="small"
                                           label="Fällig am"
                                           type="date"
@@ -1062,7 +1237,6 @@ export default function Aufgaben() {
                                             width: { xs: 145, sm: 180 },
                                             flexShrink: 0,
                                             alignSelf: 'flex-start',
-                                            ml: 'auto',
                                             '& .MuiInputBase-root': { bgcolor: 'background.paper' },
                                           }}
                                         />
@@ -1077,7 +1251,8 @@ export default function Aufgaben() {
                                             {aufgabeIstOffen ? <ExpandLessIcon /> : <ExpandMoreIcon />}
                                           </IconButton>
                                         </Tooltip>
-                                      </Stack>
+                                        </Stack>
+                                      </Box>
 
                                       <Collapse in={aufgabeIstOffen} timeout="auto" unmountOnExit>
                                         <Divider sx={{ my: 1.5 }} />
@@ -1094,14 +1269,113 @@ export default function Aufgaben() {
                                               <RichTextContent value={aufgabe.notizen} sx={{ mt: 0.25, fontSize: '0.875rem' }} />
                                             </Box>
                                           )}
+                                          <Box>
+                                            <Stack direction="row" alignItems="center" justifyContent="space-between" gap={1}>
+                                              <Typography variant="caption" color="text.secondary" fontWeight={700}>
+                                                Unteraufgaben
+                                              </Typography>
+                                              {unteraufgaben.length > 0 && (
+                                                <Chip
+                                                  size="small"
+                                                  variant="outlined"
+                                                  label={`${erledigteUnteraufgaben}/${unteraufgaben.length} erledigt`}
+                                                />
+                                              )}
+                                            </Stack>
+                                            {unteraufgaben.length > 0 && (
+                                              <Stack spacing={0.5} sx={{ mt: 0.75 }}>
+                                                {unteraufgaben.map((unteraufgabe) => (
+                                                  <Stack
+                                                    key={unteraufgabe.id}
+                                                    direction="row"
+                                                    alignItems="center"
+                                                    gap={0.5}
+                                                    sx={{
+                                                      minWidth: 0,
+                                                      px: 0.5,
+                                                      py: 0.25,
+                                                      borderRadius: 1,
+                                                      '&:hover': { bgcolor: 'action.hover' },
+                                                    }}
+                                                  >
+                                                    <Checkbox
+                                                      size="small"
+                                                      checked={unteraufgabe.erledigt}
+                                                      disabled={unteraufgabeSpeichertId === aufgabe.id}
+                                                      onChange={() => unteraufgabeStatusAendern(aufgabe, unteraufgabe.id)}
+                                                      sx={{ p: 0.5, flexShrink: 0 }}
+                                                      inputProps={{ 'aria-label': `Unteraufgabe ${unteraufgabe.titel} erledigt` }}
+                                                    />
+                                                    <Typography
+                                                      variant="body2"
+                                                      sx={{
+                                                        flexGrow: 1,
+                                                        minWidth: 0,
+                                                        overflowWrap: 'anywhere',
+                                                        textDecoration: unteraufgabe.erledigt ? 'line-through' : 'none',
+                                                        color: unteraufgabe.erledigt ? 'text.secondary' : 'text.primary',
+                                                      }}
+                                                    >
+                                                      {unteraufgabe.titel}
+                                                    </Typography>
+                                                    <Tooltip title="Unteraufgabe löschen">
+                                                      <IconButton
+                                                        size="small"
+                                                        color="error"
+                                                        disabled={unteraufgabeSpeichertId === aufgabe.id}
+                                                        onClick={() => unteraufgabeLoeschen(aufgabe, unteraufgabe)}
+                                                        aria-label={`Unteraufgabe ${unteraufgabe.titel} löschen`}
+                                                        sx={{ flexShrink: 0 }}
+                                                      >
+                                                        <DeleteIcon fontSize="small" />
+                                                      </IconButton>
+                                                    </Tooltip>
+                                                  </Stack>
+                                                ))}
+                                              </Stack>
+                                            )}
+                                            <Stack
+                                              direction={{ xs: 'column', sm: 'row' }}
+                                              gap={0.75}
+                                              alignItems={{ xs: 'stretch', sm: 'center' }}
+                                              sx={{ mt: 0.75 }}
+                                            >
+                                              <TextField
+                                                size="small"
+                                                fullWidth
+                                                label="Neue Unteraufgabe"
+                                                value={unteraufgabeEingaben[aufgabe.id] || ''}
+                                                disabled={unteraufgabeSpeichertId === aufgabe.id}
+                                                onChange={(event) => setUnteraufgabeEingaben((vorher) => ({
+                                                  ...vorher,
+                                                  [aufgabe.id]: event.target.value,
+                                                }))}
+                                                onKeyDown={(event) => {
+                                                  if (event.key === 'Enter') {
+                                                    event.preventDefault()
+                                                    unteraufgabeHinzufuegen(aufgabe)
+                                                  }
+                                                }}
+                                              />
+                                              <Button
+                                                size="small"
+                                                variant="outlined"
+                                                startIcon={<AddIcon />}
+                                                disabled={
+                                                  unteraufgabeSpeichertId === aufgabe.id
+                                                  || !String(unteraufgabeEingaben[aufgabe.id] || '').trim()
+                                                }
+                                                onClick={() => unteraufgabeHinzufuegen(aufgabe)}
+                                                sx={{ flexShrink: 0 }}
+                                              >
+                                                Hinzufügen
+                                              </Button>
+                                            </Stack>
+                                          </Box>
                                           <Stack direction="row" gap={0.75} flexWrap="wrap" useFlexGap>
                                             <Chip size="small" variant="outlined" label={`Fällig: ${datumFormatieren(aufgabe.faelligAm)}`} sx={{ maxWidth: '100%', height: 'auto', '& .MuiChip-label': { whiteSpace: 'normal', py: 0.35, overflowWrap: 'anywhere' } }} />
                                             {aufgabe.verantwortlich && <Chip size="small" variant="outlined" label={`Verantwortlich: ${aufgabe.verantwortlich}`} sx={{ maxWidth: '100%', height: 'auto', '& .MuiChip-label': { whiteSpace: 'normal', py: 0.35, overflowWrap: 'anywhere' } }} />}
                                             {aufgabe.wiederholung && aufgabe.wiederholung !== 'Keine' && <Chip size="small" variant="outlined" label={`Wiederholung: ${aufgabe.wiederholung}`} sx={{ maxWidth: '100%', height: 'auto', '& .MuiChip-label': { whiteSpace: 'normal', py: 0.35, overflowWrap: 'anywhere' } }} />}
-                                          </Stack>
-                                          <Stack direction="row" justifyContent="flex-end" gap={1} flexWrap="wrap" useFlexGap>
-                                            <Button size="small" startIcon={<EditIcon />} onClick={() => aufgabeBearbeiten(aufgabe)}>Bearbeiten</Button>
-                                            <Button size="small" color="error" startIcon={<DeleteIcon />} onClick={() => aufgabeLoeschen(aufgabe)}>Löschen</Button>
                                           </Stack>
                                         </Stack>
                                       </Collapse>
