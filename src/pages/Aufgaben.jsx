@@ -821,6 +821,34 @@ export default function Aufgaben() {
     }
   }
 
+  async function unteraufgabeTitelAendern(aufgabe, unteraufgabeId, titel) {
+    if (!user || unteraufgabeSpeichertId === aufgabe.id) return
+
+    const normalisierteUnteraufgaben = unteraufgabenNormalisieren(aufgabe.unteraufgaben)
+    const aktuelleUnteraufgabe = normalisierteUnteraufgaben.find((unteraufgabe) => unteraufgabe.id === unteraufgabeId)
+    const neuerTitel = String(titel || '').trim()
+    if (!aktuelleUnteraufgabe || !neuerTitel || aktuelleUnteraufgabe.titel === neuerTitel) return
+
+    setUnteraufgabeSpeichertId(aufgabe.id)
+    setFehler('')
+    try {
+      const unteraufgaben = normalisierteUnteraufgaben.map((unteraufgabe) => (
+        unteraufgabe.id === unteraufgabeId
+          ? { ...unteraufgabe, titel: neuerTitel }
+          : unteraufgabe
+      ))
+      await updateDoc(doc(db, 'suiteAufgaben', aufgabe.id), {
+        unteraufgaben,
+        aktualisiertAm: serverTimestamp(),
+      })
+    } catch (error) {
+      console.error(error)
+      setFehler('Titel der Unteraufgabe konnte nicht gespeichert werden.')
+    } finally {
+      setUnteraufgabeSpeichertId('')
+    }
+  }
+
   async function unteraufgabeNotizAendern(aufgabe, unteraufgabeId, notiz) {
     if (!user || unteraufgabeSpeichertId === aufgabe.id) return
 
@@ -1530,16 +1558,36 @@ export default function Aufgaben() {
                                                         inputProps={{ 'aria-label': `Unteraufgabe ${unteraufgabe.titel} erledigt` }}
                                                       />
                                                       <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-                                                        <Typography
-                                                          variant="body2"
-                                                          sx={{
-                                                            overflowWrap: 'anywhere',
-                                                            textDecoration: unteraufgabe.erledigt ? 'line-through' : 'none',
-                                                            color: unteraufgabe.erledigt ? 'text.secondary' : 'text.primary',
+                                                        <TextField
+                                                          key={`${unteraufgabe.id}-${unteraufgabe.titel}`}
+                                                          size="small"
+                                                          fullWidth
+                                                          variant="standard"
+                                                          label="Unteraufgabe"
+                                                          defaultValue={unteraufgabe.titel}
+                                                          disabled={unteraufgabeSpeichertId === aufgabe.id}
+                                                          onBlur={(event) => unteraufgabeTitelAendern(
+                                                            aufgabe,
+                                                            unteraufgabe.id,
+                                                            event.target.value,
+                                                          )}
+                                                          onKeyDown={(event) => {
+                                                            if (event.key === 'Enter') {
+                                                              event.preventDefault()
+                                                              event.currentTarget.blur()
+                                                            }
                                                           }}
-                                                        >
-                                                          {unteraufgabe.titel}
-                                                        </Typography>
+                                                          inputProps={{
+                                                            'aria-label': `Unteraufgabe ${unteraufgabe.titel} bearbeiten`,
+                                                          }}
+                                                          sx={{
+                                                            '& .MuiInputBase-input': {
+                                                              overflowWrap: 'anywhere',
+                                                              textDecoration: unteraufgabe.erledigt ? 'line-through' : 'none',
+                                                              color: unteraufgabe.erledigt ? 'text.secondary' : 'text.primary',
+                                                            },
+                                                          }}
+                                                        />
                                                         <TextField
                                                           key={`${unteraufgabe.id}-${unteraufgabe.notiz}`}
                                                           size="small"
