@@ -145,6 +145,10 @@ function neueUnteraufgabeId() {
   return `unteraufgabe-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
 }
 
+function tagesablaufDokumentId(userId, bereich, datum) {
+  return `${String(userId || '').replace(/[^a-zA-Z0-9_-]/g, '-')}-${bereich}-${datum}`
+}
+
 function Kennzahl({ icon, label, wert }) {
   return (
     <Paper variant="outlined" sx={{ p: 2.25 }}>
@@ -233,6 +237,12 @@ export default function Aufgaben() {
   const [unteraufgabeEingaben, setUnteraufgabeEingaben] = useState({})
   const [unteraufgabeNotizEingaben, setUnteraufgabeNotizEingaben] = useState({})
   const [unteraufgabeSpeichertId, setUnteraufgabeSpeichertId] = useState('')
+  const [tagesablaufDatum, setTagesablaufDatum] = useState(() => heuteIso())
+  const [tagesablaufInhalt, setTagesablaufInhalt] = useState('')
+  const [tagesablaufEntwurf, setTagesablaufEntwurf] = useState('')
+  const [tagesablaufOffen, setTagesablaufOffen] = useState(false)
+  const [tagesablaufGeladen, setTagesablaufGeladen] = useState(false)
+  const [tagesablaufSpeichert, setTagesablaufSpeichert] = useState(false)
   const laufendeKategorieBereinigungen = useRef(new Set())
 
   useEffect(() => {
@@ -258,6 +268,32 @@ export default function Aufgaben() {
     )
     return () => { unsubAufgaben(); unsubKategorien() }
   }, [user])
+
+
+  useEffect(() => {
+    if (!user || !tagesablaufDatum) return undefined
+
+    const tagesablaufRef = doc(
+      db,
+      'aufgabenTagesablaeufe',
+      tagesablaufDokumentId(user.uid, bereich, tagesablaufDatum),
+    )
+
+    return onSnapshot(
+      tagesablaufRef,
+      (snapshot) => {
+        const inhalt = snapshot.exists() ? String(snapshot.data()?.inhalt || '') : ''
+        setTagesablaufInhalt(inhalt)
+        setTagesablaufEntwurf(inhalt)
+        setTagesablaufGeladen(true)
+      },
+      (error) => {
+        console.error(error)
+        setTagesablaufGeladen(true)
+        setFehler('Tagesablauf konnte nicht geladen werden. Prüfe die Firestore-Regeln.')
+      },
+    )
+  }, [user, bereich, tagesablaufDatum])
 
   useEffect(() => {
     if (!user) return
@@ -353,6 +389,7 @@ export default function Aufgaben() {
   const manuelleSortierungSchluessel = user ? `sven-suite-aufgaben-manuell-${user.uid}` : ''
   const bereichSchluessel = user ? `sven-suite-aufgaben-bereich-${user.uid}` : ''
   const bereichName = bereich === 'privat' ? 'Privat' : 'Arbeit'
+  const tagesablaufHatAenderungen = tagesablaufEntwurf !== tagesablaufInhalt
 
   // Nur Aufgaben mit einer ausdrücklichen Bereichszuordnung werden angezeigt.
   // Bestehende Aufgaben ohne "bereich" bleiben unverändert und werden nicht automatisch migriert.
@@ -422,11 +459,13 @@ export default function Aufgaben() {
       const datumsGruppenMap = new Map()
       gruppenAufgaben.forEach((aufgabe) => {
         const datum = aufgabe.faelligAm || ''
-        const schluessel = datum || 'ohne-faelligkeit'
+        const istUeberfaellig = Boolean(!aufgabe.erledigt && datum && datum < heute)
+        const schluessel = istUeberfaellig ? 'ueberfaellig' : (datum || 'ohne-faelligkeit')
         if (!datumsGruppenMap.has(schluessel)) {
           datumsGruppenMap.set(schluessel, {
             id: `prioritaet-${prioritaet.toLowerCase()}-datum-${schluessel}`,
-            datum,
+            datum: istUeberfaellig ? '' : datum,
+            istUeberfaelligGruppe: istUeberfaellig,
             aufgaben: [],
           })
         }
@@ -434,6 +473,8 @@ export default function Aufgaben() {
       })
 
       const datumsGruppen = [...datumsGruppenMap.values()].sort((a, b) => {
+        if (a.istUeberfaelligGruppe && !b.istUeberfaelligGruppe) return -1
+        if (!a.istUeberfaelligGruppe && b.istUeberfaelligGruppe) return 1
         if (!a.datum && !b.datum) return 0
         if (!a.datum) return 1
         if (!b.datum) return -1
@@ -448,14 +489,62 @@ export default function Aufgaben() {
         datumsGruppen,
       }
     })
-    .filter((gruppe) => gruppe.aufgaben.length > 0), [gefilterteAufgaben, manuelleSortierung, sortierung])
+    .filter((gruppe) => gruppe.aufgaben.length > 0), [gefilterteAufgaben, heute, manuelleSortierung, sortierung])
 
   function bereichWechseln(_event, neuerBereich) {
     if (!neuerBereich) return
+    if (
+      tagesablaufHatAenderungen
+      && !window.confirm('Im Tagesablauf gibt es ungespeicherte Änderungen. Bereich trotzdem wechseln?')
+    ) return
 
+    setTagesablaufGeladen(false)
     setBereich(neuerBereich)
     setFilterKategorie('Alle')
     if (bereichSchluessel) localStorage.setItem(bereichSchluessel, neuerBereich)
+  }
+
+  function tagesablaufDatumWechseln(event) {
+    const neuesDatum = event.target.value
+    if (!neuesDatum || neuesDatum === tagesablaufDatum) return
+    if (
+      tagesablaufHatAenderungen
+      && !window.confirm('Im Tagesablauf gibt es ungespeicherte Änderungen. Datum trotzdem wechseln?')
+    ) return
+    setTagesablaufGeladen(false)
+    setTagesablaufDatum(neuesDatum)
+  }
+
+  async function tagesablaufSpeichern() {
+    if (!user || !tagesablaufDatum || tagesablaufSpeichert) return
+
+    setTagesablaufSpeichert(true)
+    setFehler('')
+    try {
+      const inhalt = cleanRichTextForStorage(tagesablaufEntwurf)
+      await setDoc(
+        doc(
+          db,
+          'aufgabenTagesablaeufe',
+          tagesablaufDokumentId(user.uid, bereich, tagesablaufDatum),
+        ),
+        {
+          userId: user.uid,
+          bereich,
+          datum: tagesablaufDatum,
+          inhalt,
+          aktualisiertAm: serverTimestamp(),
+        },
+        { merge: true },
+      )
+      setTagesablaufInhalt(inhalt)
+      setTagesablaufEntwurf(inhalt)
+    } catch (error) {
+      console.error(error)
+      setFehler('Tagesablauf konnte nicht gespeichert werden.')
+    } finally {
+      setTagesablaufSpeichert(false)
+    }
   }
 
   function neueAufgabe(kategorieId = '', prioritaet = 'Mittel') {
@@ -476,9 +565,11 @@ export default function Aufgaben() {
     return naechsterStand
   }
 
-  function datumsGruppeUmschalten(id) {
+  function datumsGruppeUmschalten(id, standardOffen = true) {
     setOffeneDatumsGruppen((vorher) => {
-      const naechsterStand = { ...vorher, [id]: vorher[id] === false }
+      const hatGespeichertenStand = Object.prototype.hasOwnProperty.call(vorher, id)
+      const istAktuellOffen = hatGespeichertenStand ? vorher[id] !== false : standardOffen
+      const naechsterStand = { ...vorher, [id]: !istAktuellOffen }
       if (offeneDatumsGruppenSchluessel) {
         localStorage.setItem(offeneDatumsGruppenSchluessel, JSON.stringify(naechsterStand))
       }
@@ -940,6 +1031,98 @@ export default function Aufgaben() {
         <Kennzahl icon={<TaskAltIcon color="success" />} label="Erledigt" wert={kennzahlen.erledigt} />
       </Box>
 
+      <Paper variant="outlined" sx={{ overflow: 'hidden' }}>
+        <Stack
+          direction={{ xs: 'column', sm: 'row' }}
+          alignItems={{ xs: 'stretch', sm: 'center' }}
+          gap={1}
+          sx={{ p: { xs: 1.25, sm: 1.5 }, bgcolor: tagesablaufOffen ? 'action.hover' : 'background.paper' }}
+        >
+          <Stack
+            direction="row"
+            alignItems="flex-start"
+            gap={0.75}
+            onClick={() => setTagesablaufOffen((offen) => !offen)}
+            sx={{ flexGrow: 1, minWidth: 0, cursor: 'pointer' }}
+          >
+            <IconButton
+              size="small"
+              tabIndex={-1}
+              aria-label={tagesablaufOffen ? 'Tagesablauf einklappen' : 'Tagesablauf ausklappen'}
+              sx={{ flexShrink: 0 }}
+            >
+              {tagesablaufOffen ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+            </IconButton>
+            <Box sx={{ minWidth: 0, flexGrow: 1 }}>
+              <Stack direction="row" gap={0.75} alignItems="center" flexWrap="wrap" useFlexGap>
+                <Typography fontWeight={850}>Tagesablauf</Typography>
+                {tagesablaufDatum === heute && <Chip size="small" color="warning" label="Heute" />}
+                {tagesablaufHatAenderungen && <Chip size="small" color="warning" variant="outlined" label="Ungespeichert" />}
+              </Stack>
+              <Typography variant="body2" color="text.secondary" sx={{ textTransform: 'capitalize' }}>
+                {datumsGruppeFormatieren(tagesablaufDatum)} · {bereichName}
+              </Typography>
+              {!tagesablaufOffen && tagesablaufInhalt && (
+                <RichTextContent
+                  value={tagesablaufInhalt}
+                  sx={{ mt: 0.6, fontSize: '0.875rem', maxHeight: '2.9em', overflow: 'hidden' }}
+                />
+              )}
+              {!tagesablaufOffen && !tagesablaufInhalt && tagesablaufGeladen && (
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+                  Noch kein Tagesablauf eingetragen.
+                </Typography>
+              )}
+            </Box>
+          </Stack>
+          <TextField
+            size="small"
+            label="Tag"
+            type="date"
+            value={tagesablaufDatum}
+            onChange={tagesablaufDatumWechseln}
+            InputLabelProps={{ shrink: true }}
+            sx={{ width: { xs: '100%', sm: 180 }, flexShrink: 0 }}
+          />
+        </Stack>
+
+        <Collapse in={tagesablaufOffen} timeout="auto" unmountOnExit>
+          <Divider />
+          <Box sx={{ p: { xs: 1.25, sm: 1.75 } }}>
+            {!tagesablaufGeladen ? (
+              <Typography color="text.secondary">Tagesablauf wird geladen …</Typography>
+            ) : (
+              <Stack spacing={1.25}>
+                <RichTextEditor
+                  label={`Notiz für ${datumFormatieren(tagesablaufDatum)}`}
+                  value={tagesablaufEntwurf}
+                  onChange={setTagesablaufEntwurf}
+                  minHeight={180}
+                />
+                <Stack
+                  direction={{ xs: 'column', sm: 'row' }}
+                  justifyContent="space-between"
+                  alignItems={{ sm: 'center' }}
+                  gap={1}
+                >
+                  <Typography variant="caption" color="text.secondary">
+                    Beliebig lange Tagesnotiz mit Fett, Kursiv, Unterstrichen, Schriftfarbe und Zeilenumbrüchen.
+                  </Typography>
+                  <Button
+                    variant="contained"
+                    onClick={tagesablaufSpeichern}
+                    disabled={tagesablaufSpeichert || !tagesablaufHatAenderungen}
+                    sx={{ minWidth: 120, flexShrink: 0 }}
+                  >
+                    {tagesablaufSpeichert ? 'Speichert …' : 'Speichern'}
+                  </Button>
+                </Stack>
+              </Stack>
+            )}
+          </Box>
+        </Collapse>
+      </Paper>
+
       <Paper sx={{ p: 2 }}>
         <Stack direction={{ xs: 'column', lg: 'row' }} spacing={2} alignItems={{ lg: 'center' }}>
           <TextField label="Suche" value={suche} onChange={(e) => setSuche(e.target.value)} fullWidth />
@@ -980,7 +1163,7 @@ export default function Aufgaben() {
             <Box>
               <Typography variant="h6" fontWeight={800}>Aufgaben nach Priorität</Typography>
               <Typography variant="body2" color="text.secondary">
-                Prioritätsgruppen und Fälligkeitstage anklicken, um sie ein- oder auszuklappen.
+                Prioritätsgruppen und Fälligkeitstage anklicken, um sie ein- oder auszuklappen. Überfällige Aufgaben sind je Priorität in einer gemeinsamen Gruppe zusammengefasst.
               </Typography>
             </Box>
             {prioritaetsGruppen.length > 1 && (
@@ -1054,13 +1237,13 @@ export default function Aufgaben() {
                 <Collapse in={istOffen} timeout="auto" unmountOnExit>
                   <Stack spacing={1.25} sx={{ p: 1.5, pt: 1.25 }}>
                     {gruppe.datumsGruppen.map((datumsGruppe) => {
-                      const datumsGruppeIstOffen = offeneDatumsGruppen[datumsGruppe.id] !== false
-                      const gruppeIstHeute = datumsGruppe.datum === heute
-                      const gruppeIstUeberfaellig = Boolean(
-                        datumsGruppe.datum
-                        && datumsGruppe.datum < heute
-                        && datumsGruppe.aufgaben.some((aufgabe) => !aufgabe.erledigt),
-                      )
+                      const hatGespeichertenStand = Object.prototype.hasOwnProperty.call(offeneDatumsGruppen, datumsGruppe.id)
+                      const standardOffen = !datumsGruppe.istUeberfaelligGruppe
+                      const datumsGruppeIstOffen = hatGespeichertenStand
+                        ? offeneDatumsGruppen[datumsGruppe.id] !== false
+                        : standardOffen
+                      const gruppeIstHeute = !datumsGruppe.istUeberfaelligGruppe && datumsGruppe.datum === heute
+                      const gruppeIstUeberfaellig = datumsGruppe.istUeberfaelligGruppe === true
 
                       return (
                         <Paper key={datumsGruppe.id} variant="outlined" sx={{ overflow: 'hidden', minWidth: 0 }}>
@@ -1071,11 +1254,11 @@ export default function Aufgaben() {
                             role="button"
                             tabIndex={0}
                             aria-expanded={datumsGruppeIstOffen}
-                            onClick={() => datumsGruppeUmschalten(datumsGruppe.id)}
+                            onClick={() => datumsGruppeUmschalten(datumsGruppe.id, standardOffen)}
                             onKeyDown={(event) => {
                               if (event.key === 'Enter' || event.key === ' ') {
                                 event.preventDefault()
-                                datumsGruppeUmschalten(datumsGruppe.id)
+                                datumsGruppeUmschalten(datumsGruppe.id, standardOffen)
                               }
                             }}
                             sx={{
@@ -1087,16 +1270,25 @@ export default function Aufgaben() {
                               '&:hover': { bgcolor: 'action.hover' },
                             }}
                           >
-                            <IconButton size="small" tabIndex={-1} aria-label={datumsGruppeIstOffen ? 'Fälligkeitstag schließen' : 'Fälligkeitstag öffnen'} sx={{ flexShrink: 0 }}>
+                            <IconButton
+                              size="small"
+                              tabIndex={-1}
+                              aria-label={datumsGruppeIstOffen
+                                ? (gruppeIstUeberfaellig ? 'Überfällige Aufgaben schließen' : 'Fälligkeitstag schließen')
+                                : (gruppeIstUeberfaellig ? 'Überfällige Aufgaben öffnen' : 'Fälligkeitstag öffnen')}
+                              sx={{ flexShrink: 0 }}
+                            >
                               {datumsGruppeIstOffen ? <ExpandLessIcon /> : <ExpandMoreIcon />}
                             </IconButton>
                             <Box sx={{ flexGrow: 1, minWidth: 0 }}>
                               <Typography fontWeight={850} sx={{ textTransform: 'capitalize', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
-                                {datumsGruppeFormatieren(datumsGruppe.datum)}
+                                {gruppeIstUeberfaellig ? 'Überfällig' : datumsGruppeFormatieren(datumsGruppe.datum)}
                               </Typography>
                               <Stack direction="row" gap={0.75} alignItems="center" flexWrap="wrap" useFlexGap mt={0.5}>
                                 <Typography variant="body2" color="text.secondary">
-                                  {datumsGruppe.aufgaben.length} Aufgabe{datumsGruppe.aufgaben.length === 1 ? '' : 'n'} an diesem Tag
+                                  {gruppeIstUeberfaellig
+                                    ? `${datumsGruppe.aufgaben.length} überfällige Aufgabe${datumsGruppe.aufgaben.length === 1 ? '' : 'n'}`
+                                    : `${datumsGruppe.aufgaben.length} Aufgabe${datumsGruppe.aufgaben.length === 1 ? '' : 'n'} an diesem Tag`}
                                 </Typography>
                                 {gruppeIstHeute && <Chip size="small" color="warning" label="Heute" />}
                                 {gruppeIstUeberfaellig && <Chip size="small" color="error" label="Überfällig" />}
