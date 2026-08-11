@@ -612,6 +612,12 @@ export default function Verhandlungen({
   const [sortRichtung, setSortRichtung] = useState("asc");
   const [verhandlungenArchivAufgeklappt, setVerhandlungenArchivAufgeklappt] =
     useState(false);
+  const [verhandlungsGruppenAufgeklappt, setVerhandlungsGruppenAufgeklappt] =
+    useState({
+      Offen: true,
+      "In Verhandlung": true,
+      Abgeschlossen: false,
+    });
 
   const [lieferantenSuche, setLieferantenSuche] = useState("");
   const [lieferantenKategorieFilter, setLieferantenKategorieFilter] =
@@ -866,6 +872,26 @@ export default function Verhandlungen({
       ),
     [gefilterteVerhandlungenAlle]
   );
+
+  const verhandlungsGruppen = useMemo(
+    () =>
+      ["Offen", "In Verhandlung", "Abgeschlossen"]
+        .map((status) => ({
+          status,
+          eintraege: gefilterteVerhandlungen.filter(
+            (eintrag) => statusNormalisieren(eintrag.status) === status
+          ),
+        }))
+        .filter((gruppe) => gruppe.eintraege.length > 0),
+    [gefilterteVerhandlungen]
+  );
+
+  function verhandlungsGruppeSetzen(status, aufgeklappt) {
+    setVerhandlungsGruppenAufgeklappt((bisher) => ({
+      ...bisher,
+      [status]: aufgeklappt,
+    }));
+  }
 
   const gefilterteArchivVerhandlungen = useMemo(
     () =>
@@ -1751,6 +1777,14 @@ export default function Verhandlungen({
     setPrioritaetFilter("Alle");
     setStatusFilter(filter);
     setVerhandlungenArchivAufgeklappt(false);
+    if (filter === "Abgeschlossen") {
+      verhandlungsGruppeSetzen("Abgeschlossen", true);
+    } else if (filter === "Aktiv") {
+      verhandlungsGruppeSetzen("Offen", true);
+      verhandlungsGruppeSetzen("In Verhandlung", true);
+    } else if (["Offen", "In Verhandlung"].includes(filter)) {
+      verhandlungsGruppeSetzen(filter, true);
+    }
 
     window.setTimeout(() => {
       verhandlungenListeRef.current?.scrollIntoView({
@@ -2187,9 +2221,64 @@ export default function Verhandlungen({
                 </Typography>
               </CardContent>
             </Card>
-          ) : istMobil ? (
+          ) : (
             <Stack spacing={1.5}>
-              {gefilterteVerhandlungen.map((eintrag) => (
+              {verhandlungsGruppen.map((gruppe) => (
+                <Accordion
+                  key={gruppe.status}
+                  disableGutters
+                  expanded={verhandlungsGruppenAufgeklappt[gruppe.status] !== false}
+                  onChange={(_, aufgeklappt) =>
+                    verhandlungsGruppeSetzen(gruppe.status, aufgeklappt)
+                  }
+                  variant="outlined"
+                  sx={{
+                    border: "2px solid",
+                    borderColor: statusRahmenFarbe(gruppe.status),
+                    borderRadius: "14px !important",
+                    overflow: "hidden",
+                    "&:before": { display: "none" },
+                  }}
+                >
+                  <AccordionSummary
+                    expandIcon={<ExpandMoreIcon />}
+                    sx={{
+                      bgcolor: "action.hover",
+                      px: { xs: 1.5, md: 2 },
+                      "& .MuiAccordionSummary-content": {
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        gap: 1,
+                      },
+                    }}
+                  >
+                    <Stack
+                      direction="row"
+                      alignItems="center"
+                      spacing={1}
+                      sx={{ minWidth: 0 }}
+                    >
+                      <Typography fontWeight={900}>{gruppe.status}</Typography>
+                      <Chip
+                        size="small"
+                        color={statusFarbe(gruppe.status)}
+                        label={gruppe.eintraege.length}
+                      />
+                    </Stack>
+                    <Typography
+                      variant="caption"
+                      color="text.secondary"
+                      sx={{ display: { xs: "none", sm: "block" }, pr: 1 }}
+                    >
+                      {gruppe.eintraege.length === 1
+                        ? "1 Verhandlung"
+                        : `${gruppe.eintraege.length} Verhandlungen`}
+                    </Typography>
+                  </AccordionSummary>
+                  <AccordionDetails sx={{ p: { xs: 1, md: 1.5 } }}>
+                    {istMobil ? (
+            <Stack spacing={1.5}>
+              {gruppe.eintraege.map((eintrag) => (
                 <Accordion
                   key={eintrag.id}
                   disableGutters
@@ -2432,7 +2521,7 @@ export default function Verhandlungen({
                 </Accordion>
               ))}
             </Stack>
-          ) : (
+                    ) : (
             <TableContainer component={Paper} sx={{ width: "100%", overflowX: "hidden" }}>
               <Table
                 stickyHeader
@@ -2517,7 +2606,7 @@ export default function Verhandlungen({
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {gefilterteVerhandlungen.map((eintrag) => (
+                  {gruppe.eintraege.map((eintrag) => (
                     <TableRow
                       hover
                       key={eintrag.id}
@@ -2643,6 +2732,11 @@ export default function Verhandlungen({
                 </TableBody>
               </Table>
             </TableContainer>
+                    )}
+                  </AccordionDetails>
+                </Accordion>
+              ))}
+            </Stack>
           )}
           </Box>
 
