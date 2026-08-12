@@ -237,6 +237,7 @@ export default function Aufgaben() {
   const [unteraufgabeEingaben, setUnteraufgabeEingaben] = useState({})
   const [unteraufgabeNotizEingaben, setUnteraufgabeNotizEingaben] = useState({})
   const [unteraufgabeSpeichertId, setUnteraufgabeSpeichertId] = useState('')
+  const [offeneUnteraufgabeNotizen, setOffeneUnteraufgabeNotizen] = useState({})
   const [tagesablaufDatum, setTagesablaufDatum] = useState(() => heuteIso())
   const [tagesablaufInhalt, setTagesablaufInhalt] = useState('')
   const [tagesablaufEntwurf, setTagesablaufEntwurf] = useState('')
@@ -1548,20 +1549,22 @@ export default function Aufgaben() {
                                                       '&:hover': { bgcolor: 'action.hover' },
                                                     }}
                                                   >
-                                                    <Stack direction="row" alignItems="flex-start" gap={0.5}>
-                                                      <Checkbox
-                                                        size="small"
-                                                        checked={unteraufgabe.erledigt}
-                                                        disabled={unteraufgabeSpeichertId === aufgabe.id}
-                                                        onChange={() => unteraufgabeStatusAendern(aufgabe, unteraufgabe.id)}
-                                                        sx={{ p: 0.5, flexShrink: 0 }}
-                                                        inputProps={{ 'aria-label': `Unteraufgabe ${unteraufgabe.titel} erledigt` }}
-                                                      />
-                                                      <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+                                                    <Box sx={{ minWidth: 0 }}>
+                                                      <Stack direction="row" alignItems="flex-start" gap={0.25} sx={{ minWidth: 0 }}>
+                                                        <Checkbox
+                                                          size="small"
+                                                          checked={unteraufgabe.erledigt}
+                                                          disabled={unteraufgabeSpeichertId === aufgabe.id}
+                                                          onChange={() => unteraufgabeStatusAendern(aufgabe, unteraufgabe.id)}
+                                                          sx={{ p: 0.5, mt: 0.25, flexShrink: 0 }}
+                                                          inputProps={{ 'aria-label': `Unteraufgabe ${unteraufgabe.titel} erledigt` }}
+                                                        />
                                                         <TextField
                                                           key={`${unteraufgabe.id}-${unteraufgabe.titel}`}
                                                           size="small"
                                                           fullWidth
+                                                          multiline
+                                                          minRows={1}
                                                           variant="standard"
                                                           label="Unteraufgabe"
                                                           defaultValue={unteraufgabe.titel}
@@ -1571,32 +1574,60 @@ export default function Aufgaben() {
                                                             unteraufgabe.id,
                                                             event.target.value,
                                                           )}
-                                                          onKeyDown={(event) => {
-                                                            if (event.key === 'Enter') {
-                                                              event.preventDefault()
-                                                              event.currentTarget.blur()
-                                                            }
-                                                          }}
                                                           inputProps={{
                                                             'aria-label': `Unteraufgabe ${unteraufgabe.titel} bearbeiten`,
                                                           }}
                                                           sx={{
-                                                            '& .MuiInputBase-input': {
+                                                            flexGrow: 1,
+                                                            minWidth: 0,
+                                                            '& .MuiInputBase-root': { alignItems: 'flex-start' },
+                                                            '& .MuiInputBase-inputMultiline': {
+                                                              overflow: 'hidden',
                                                               overflowWrap: 'anywhere',
+                                                              whiteSpace: 'pre-wrap',
+                                                              lineHeight: 1.45,
                                                               textDecoration: unteraufgabe.erledigt ? 'line-through' : 'none',
                                                               color: unteraufgabe.erledigt ? 'text.secondary' : 'text.primary',
                                                             },
                                                           }}
                                                         />
+                                                        <Tooltip title={offeneUnteraufgabeNotizen[`${aufgabe.id}:${unteraufgabe.id}`] ? 'Notiz einklappen' : 'Notiz ausklappen'}>
+                                                          <IconButton
+                                                            size="small"
+                                                            onClick={() => setOffeneUnteraufgabeNotizen((vorher) => {
+                                                              const schluessel = `${aufgabe.id}:${unteraufgabe.id}`
+                                                              return { ...vorher, [schluessel]: !vorher[schluessel] }
+                                                            })}
+                                                            aria-expanded={Boolean(offeneUnteraufgabeNotizen[`${aufgabe.id}:${unteraufgabe.id}`])}
+                                                            aria-label={`Notiz zu Unteraufgabe ${unteraufgabe.titel} ${offeneUnteraufgabeNotizen[`${aufgabe.id}:${unteraufgabe.id}`] ? 'einklappen' : 'ausklappen'}`}
+                                                            sx={{ flexShrink: 0, mt: 0.15 }}
+                                                          >
+                                                            {offeneUnteraufgabeNotizen[`${aufgabe.id}:${unteraufgabe.id}`] ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
+                                                          </IconButton>
+                                                        </Tooltip>
+                                                        <Tooltip title="Unteraufgabe löschen">
+                                                          <IconButton
+                                                            size="small"
+                                                            color="error"
+                                                            disabled={unteraufgabeSpeichertId === aufgabe.id}
+                                                            onClick={() => unteraufgabeLoeschen(aufgabe, unteraufgabe)}
+                                                            aria-label={`Unteraufgabe ${unteraufgabe.titel} löschen`}
+                                                            sx={{ flexShrink: 0, mt: 0.15 }}
+                                                          >
+                                                            <DeleteIcon fontSize="small" />
+                                                          </IconButton>
+                                                        </Tooltip>
+                                                      </Stack>
+                                                      <Collapse in={Boolean(offeneUnteraufgabeNotizen[`${aufgabe.id}:${unteraufgabe.id}`])} timeout="auto" unmountOnExit>
                                                         <TextField
                                                           key={`${unteraufgabe.id}-${unteraufgabe.notiz}`}
                                                           size="small"
                                                           fullWidth
                                                           multiline
-                                                          minRows={1}
-                                                          maxRows={4}
-                                                          variant="standard"
+                                                          minRows={2}
+                                                          variant="outlined"
                                                           label="Notiz zur Unteraufgabe"
+                                                          placeholder="Notiz hinzufügen …"
                                                           defaultValue={unteraufgabe.notiz}
                                                           disabled={unteraufgabeSpeichertId === aufgabe.id}
                                                           onBlur={(event) => unteraufgabeNotizAendern(
@@ -1604,22 +1635,10 @@ export default function Aufgaben() {
                                                             unteraufgabe.id,
                                                             event.target.value,
                                                           )}
-                                                          sx={{ mt: 0.35 }}
+                                                          sx={{ mt: 0.75, ml: { xs: 0, sm: 4.25 }, width: { xs: '100%', sm: 'calc(100% - 34px)' } }}
                                                         />
-                                                      </Box>
-                                                      <Tooltip title="Unteraufgabe löschen">
-                                                        <IconButton
-                                                          size="small"
-                                                          color="error"
-                                                          disabled={unteraufgabeSpeichertId === aufgabe.id}
-                                                          onClick={() => unteraufgabeLoeschen(aufgabe, unteraufgabe)}
-                                                          aria-label={`Unteraufgabe ${unteraufgabe.titel} löschen`}
-                                                          sx={{ flexShrink: 0 }}
-                                                        >
-                                                          <DeleteIcon fontSize="small" />
-                                                        </IconButton>
-                                                      </Tooltip>
-                                                    </Stack>
+                                                      </Collapse>
+                                                    </Box>
                                                   </Box>
                                                 ))}
                                               </Stack>
