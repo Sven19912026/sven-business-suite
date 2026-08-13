@@ -1546,7 +1546,12 @@ export default function Aufgaben() {
                                                       px: 0.5,
                                                       py: 0.5,
                                                       borderRadius: 1,
-                                                      '&:hover': { bgcolor: 'action.hover' },
+                                                      bgcolor: unteraufgabe.erledigt ? 'action.disabledBackground' : 'transparent',
+                                                      opacity: unteraufgabe.erledigt ? 0.62 : 1,
+                                                      transition: 'background-color 160ms ease, opacity 160ms ease',
+                                                      '&:hover': {
+                                                        bgcolor: unteraufgabe.erledigt ? 'action.disabledBackground' : 'action.hover',
+                                                      },
                                                     }}
                                                   >
                                                     <Box sx={{ minWidth: 0 }}>
@@ -1587,7 +1592,11 @@ export default function Aufgaben() {
                                                               whiteSpace: 'pre-wrap',
                                                               lineHeight: 1.45,
                                                               textDecoration: unteraufgabe.erledigt ? 'line-through' : 'none',
-                                                              color: unteraufgabe.erledigt ? 'text.secondary' : 'text.primary',
+                                                              textDecorationThickness: unteraufgabe.erledigt ? '1.5px' : 'auto',
+                                                              color: unteraufgabe.erledigt ? 'text.disabled' : 'text.primary',
+                                                            },
+                                                            '& .MuiInputLabel-root': {
+                                                              color: unteraufgabe.erledigt ? 'text.disabled' : undefined,
                                                             },
                                                           }}
                                                         />
@@ -1635,7 +1644,17 @@ export default function Aufgaben() {
                                                             unteraufgabe.id,
                                                             event.target.value,
                                                           )}
-                                                          sx={{ mt: 0.75, ml: { xs: 0, sm: 4.25 }, width: { xs: '100%', sm: 'calc(100% - 34px)' } }}
+                                                          sx={{
+                                                            mt: 0.75,
+                                                            ml: { xs: 0, sm: 4.25 },
+                                                            width: { xs: '100%', sm: 'calc(100% - 34px)' },
+                                                            '& .MuiInputBase-input': {
+                                                              color: unteraufgabe.erledigt ? 'text.disabled' : 'text.primary',
+                                                            },
+                                                            '& .MuiInputLabel-root': {
+                                                              color: unteraufgabe.erledigt ? 'text.disabled' : undefined,
+                                                            },
+                                                          }}
                                                         />
                                                       </Collapse>
                                                     </Box>
