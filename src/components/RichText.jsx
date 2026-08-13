@@ -18,10 +18,21 @@ import {
   textZuRichTextHtml,
 } from '../utils/richText'
 
+function htmlEntitaetenDekodieren(value) {
+  const rohwert = String(value || '')
+  if (!rohwert || typeof document === 'undefined') return rohwert
+
+  const textarea = document.createElement('textarea')
+  textarea.innerHTML = rohwert
+  return textarea.value
+}
+
 function editorHtml(value) {
   const rohwert = String(value || '')
   if (!rohwert) return ''
-  return enthaeltRichTextHtml(rohwert) ? sanitizeRichText(rohwert) : textZuRichTextHtml(rohwert)
+  return enthaeltRichTextHtml(rohwert)
+    ? sanitizeRichText(rohwert)
+    : textZuRichTextHtml(htmlEntitaetenDekodieren(rohwert))
 }
 
 export function RichTextEditor({ label, value, onChange, minHeight = 120 }) {
@@ -201,7 +212,11 @@ export function RichTextContent({ value, sx = {} }) {
   }
 
   if (!enthaeltRichTextHtml(rohwert)) {
-    return <Box sx={{ ...basisSx, whiteSpace: 'pre-wrap', ...sx }}>{rohwert}</Box>
+    return (
+      <Box sx={{ ...basisSx, whiteSpace: 'pre-wrap', ...sx }}>
+        {htmlEntitaetenDekodieren(rohwert)}
+      </Box>
+    )
   }
 
   return (
