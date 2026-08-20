@@ -239,6 +239,85 @@ function datumFormat(wert) {
   return new Date(`${wert}T00:00:00`).toLocaleDateString("de-DE");
 }
 
+function zeitpunktFormat(wert) {
+  if (!wert) return "—";
+
+  const datum = timestampZuDatum(wert) ||
+    (wert instanceof Date ? wert : new Date(wert));
+
+  if (!(datum instanceof Date) || Number.isNaN(datum.getTime())) return "—";
+
+  return datum.toLocaleString("de-DE", {
+    dateStyle: "short",
+    timeStyle: "short",
+  });
+}
+
+function verhandlungsgegenstandHistorie(eintrag) {
+  if (!Array.isArray(eintrag?.verhandlungsgegenstandHistorie)) return [];
+
+  return eintrag.verhandlungsgegenstandHistorie
+    .map((item) => ({
+      stand: String(item?.stand ?? item?.text ?? item?.wert ?? "").trim(),
+      ersetztAm: item?.ersetztAm ?? item?.geaendertAm ?? null,
+    }))
+    .filter((item) => item.stand);
+}
+
+function VerhandlungsgegenstandHistorie({ eintrag, compact = false }) {
+  const historie = verhandlungsgegenstandHistorie(eintrag);
+  if (historie.length === 0) return null;
+
+  return (
+    <Accordion
+      disableGutters
+      variant="outlined"
+      sx={{
+        mt: compact ? 0.75 : 1.25,
+        bgcolor: "background.paper",
+        "&:before": { display: "none" },
+      }}
+    >
+      <AccordionSummary
+        expandIcon={<ExpandMoreIcon />}
+        sx={{
+          minHeight: compact ? 34 : 42,
+          px: compact ? 1 : 1.5,
+          "& .MuiAccordionSummary-content": { my: compact ? 0.5 : 0.75 },
+        }}
+      >
+        <Typography variant={compact ? "caption" : "body2"} fontWeight={800}>
+          Frühere Stände ({historie.length})
+        </Typography>
+      </AccordionSummary>
+      <AccordionDetails sx={{ px: compact ? 1 : 1.5, pt: 0, pb: 1.25 }}>
+        <Stack spacing={1}>
+          {[...historie].reverse().map((item, index) => (
+            <Box
+              key={`${item.stand}-${index}`}
+              sx={{
+                pl: 1.25,
+                borderLeft: "3px solid",
+                borderColor: "divider",
+              }}
+            >
+              <Typography
+                variant={compact ? "caption" : "body2"}
+                sx={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}
+              >
+                {item.stand}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                Ersetzt am {zeitpunktFormat(item.ersetztAm)}
+              </Typography>
+            </Box>
+          ))}
+        </Stack>
+      </AccordionDetails>
+    </Accordion>
+  );
+}
+
 function lieferterminArtErmitteln(eintrag, praefix) {
   if (eintrag?.[`${praefix}Art`]) return eintrag[`${praefix}Art`];
   if (eintrag?.[`${praefix}Monat`]) return "monat";
@@ -1210,14 +1289,35 @@ export default function Verhandlungen({
       ? (vorhandeneFrist || addiereTage(new Date()))
       : null;
 
+    const neuerVerhandlungsgegenstand =
+      verhandlungsFormular.verhandlungsgegenstand.trim();
+    const bisherigerVerhandlungsgegenstand = String(
+      bisherigerEintrag?.verhandlungsgegenstand ?? ""
+    ).trim();
+    const vorhandeneGegenstandHistorie =
+      verhandlungsgegenstandHistorie(bisherigerEintrag);
+    const gegenstandWurdeGeaendert = Boolean(
+      verhandlungsBearbeitungsId &&
+      bisherigerVerhandlungsgegenstand &&
+      bisherigerVerhandlungsgegenstand !== neuerVerhandlungsgegenstand
+    );
+    const gegenstandHistorie = gegenstandWurdeGeaendert
+      ? [
+          ...vorhandeneGegenstandHistorie,
+          {
+            stand: bisherigerVerhandlungsgegenstand,
+            ersetztAm: Timestamp.now(),
+          },
+        ]
+      : vorhandeneGegenstandHistorie;
+
     const daten = {
       ...verhandlungsFormular,
       status,
       firma: verhandlungsFormular.firma.trim(),
       kategorie: String(verhandlungsFormular.kategorie || "").trim() || "Sonstiges",
       auftraggeberName: verhandlungsFormular.auftraggeberName.trim(),
-      verhandlungsgegenstand:
-        verhandlungsFormular.verhandlungsgegenstand.trim(),
+      verhandlungsgegenstand: neuerVerhandlungsgegenstand,
       notizen: cleanRichTextForStorage(verhandlungsFormular.notizen),
       userId: benutzer.uid,
       ausgangsangebot: euroWert(verhandlungsFormular.ausgangsangebot),
@@ -1233,6 +1333,14 @@ export default function Verhandlungen({
       angeliefert: verhandlungsFormular.angeliefert === true,
       geaendertAm: serverTimestamp(),
     };
+
+    if (
+      verhandlungsBearbeitungsId &&
+      (gegenstandWurdeGeaendert ||
+        Array.isArray(bisherigerEintrag?.verhandlungsgegenstandHistorie))
+    ) {
+      daten.verhandlungsgegenstandHistorie = gegenstandHistorie;
+    }
 
     if (istBeendet) {
       daten.abgeschlossenAm = bisherigerEintrag?.abgeschlossenAm || serverTimestamp();
@@ -2424,6 +2532,8 @@ export default function Verhandlungen({
                       </Typography>
                     </Paper>
 
+                    <VerhandlungsgegenstandHistorie eintrag={eintrag} />
+
                     {eintrag.notizen && (
                       <Paper variant="outlined" sx={{ p: 1.5, mt: 1.5 }}>
                         <Typography
@@ -2646,6 +2756,7 @@ export default function Verhandlungen({
                         >
                           {eintrag.verhandlungsgegenstand || "—"}
                         </Typography>
+                        <VerhandlungsgegenstandHistorie eintrag={eintrag} compact />
                         {eintrag.notizen && (
                           <Box sx={{ mt: 0.75, pt: 0.75, borderTop: 1, borderColor: 'divider' }}>
                             <Typography variant="caption" color="text.secondary" fontWeight={700}>
@@ -2805,7 +2916,8 @@ export default function Verhandlungen({
                             <Typography sx={{ mt: 0.75 }} fontWeight={700}>
                               {eintrag.verhandlungsgegenstand || "Kein Verhandlungsgegenstand"}
                             </Typography>
-                            <Typography variant="body2" color="text.secondary">
+                            <VerhandlungsgegenstandHistorie eintrag={eintrag} compact />
+                            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.75 }}>
                               Für {eintrag.auftraggeberName || "keine Firma zugeordnet"}
                               {" · "}Liefertermin: {lieferterminAnzeige(eintrag)}
                               {" · "}Einsparung: {euroFormat(einsparung(eintrag))}
@@ -3236,8 +3348,19 @@ export default function Verhandlungen({
                 multiline
                 minRows={2}
                 placeholder="z. B. Jahreskonditionen, Fahrzeugkauf, Mietpreis oder Materialrabatt"
-                helperText="Beschreibe kurz, worüber mit diesem Lieferanten verhandelt wird."
+                helperText={
+                  verhandlungsBearbeitungsId
+                    ? "Änderungen ersetzen den aktuellen Stand. Der bisherige Stand wird automatisch in der Historie gespeichert."
+                    : "Beschreibe kurz, worüber mit diesem Lieferanten verhandelt wird."
+                }
               />
+              {verhandlungsBearbeitungsId && (
+                <VerhandlungsgegenstandHistorie
+                  eintrag={verhandlungen.find(
+                    (eintrag) => eintrag.id === verhandlungsBearbeitungsId
+                  )}
+                />
+              )}
             </Grid>
             <Grid size={{ xs: 12, md: 6 }}>
               <TextField
