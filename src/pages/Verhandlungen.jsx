@@ -344,6 +344,7 @@ function gespeicherteVerhandlungsphasen(eintrag) {
     .map((phase, index) => ({
       nummer: Number(phase?.nummer) || index + 1,
       gespeichertAm: phase?.gespeichertAm ?? phase?.erstelltAm ?? null,
+      bearbeitetAm: phase?.bearbeitetAm ?? null,
       daten: verhandlungsPhaseDaten(phase?.daten ?? phase ?? {}),
     }))
     .sort((a, b) => a.nummer - b.nummer);
@@ -456,6 +457,7 @@ function VerhandlungsphaseDetails({ phase, compact = false }) {
         <Typography fontWeight={900}>{phaseBezeichnung(phase.nummer)}</Typography>
         <Typography variant="caption" color="text.secondary">
           Gespeichert: {zeitpunktFormat(phase.gespeichertAm)}
+          {phase.bearbeitetAm ? ` · bearbeitet: ${zeitpunktFormat(phase.bearbeitetAm)}` : ""}
         </Typography>
       </Stack>
 
@@ -571,23 +573,30 @@ function VerhandlungsphaseDetails({ phase, compact = false }) {
   );
 }
 
-function VerhandlungsphasenHistorie({ eintrag, compact = false, onPhaseBearbeiten }) {
+function VerhandlungsphasenHistorie({
+  eintrag,
+  compact = false,
+  onPhaseBearbeiten,
+  onPhaseLoeschen,
+  allePhasen = false,
+}) {
   const phasen = gespeicherteVerhandlungsphasen(eintrag);
   const aktuelleNummer = aktuelleVerhandlungsphaseNummer(eintrag);
   const frueherePhasen = phasen.filter((phase) => phase.nummer !== aktuelleNummer);
+  const sichtbarePhasen = allePhasen ? phasen : frueherePhasen;
   const [auswahl, setAuswahl] = useState("");
-  const effektiveAuswahl = frueherePhasen.some(
+  const effektiveAuswahl = sichtbarePhasen.some(
     (phase) => phase.nummer === Number(auswahl)
   )
     ? Number(auswahl)
-    : (frueherePhasen.at(-1)?.nummer ?? "");
+    : (sichtbarePhasen.at(-1)?.nummer ?? "");
 
-  const ausgewaehltePhase = frueherePhasen.find(
+  const ausgewaehltePhase = sichtbarePhasen.find(
     (phase) => phase.nummer === Number(effektiveAuswahl)
   );
   const alteGegenstaende = verhandlungsgegenstandHistorie(eintrag);
 
-  if (frueherePhasen.length === 0) {
+  if (sichtbarePhasen.length === 0) {
     return alteGegenstaende.length > 0
       ? <AlteGegenstandsHistorie eintrag={eintrag} compact={compact} />
       : null;
@@ -608,7 +617,9 @@ function VerhandlungsphasenHistorie({ eintrag, compact = false, onPhaseBearbeite
         }}
       >
         <Typography variant={compact ? "caption" : "body2"} fontWeight={850}>
-          Frühere Verhandlungsphasen ({frueherePhasen.length})
+          {allePhasen
+            ? `Verhandlungsphasen verwalten (${sichtbarePhasen.length})`
+            : `Frühere Verhandlungsphasen (${sichtbarePhasen.length})`}
         </Typography>
       </AccordionSummary>
       <AccordionDetails sx={{ px: compact ? 1 : 1.5, pt: 0, pb: 1.5 }}>
@@ -621,9 +632,11 @@ function VerhandlungsphasenHistorie({ eintrag, compact = false, onPhaseBearbeite
             value={effektiveAuswahl}
             onChange={(event) => setAuswahl(Number(event.target.value))}
           >
-            {[...frueherePhasen].reverse().map((phase) => (
+            {[...sichtbarePhasen].reverse().map((phase) => (
               <MenuItem key={phase.nummer} value={phase.nummer}>
-                {phaseBezeichnung(phase.nummer)} · {zeitpunktFormat(phase.gespeichertAm)}
+                {phaseBezeichnung(phase.nummer)}
+                {phase.nummer === aktuelleNummer ? " · aktuell" : ""}
+                {` · ${zeitpunktFormat(phase.gespeichertAm)}`}
               </MenuItem>
             ))}
           </TextField>
@@ -631,18 +644,42 @@ function VerhandlungsphasenHistorie({ eintrag, compact = false, onPhaseBearbeite
           {ausgewaehltePhase && (
             <>
               <VerhandlungsphaseDetails phase={ausgewaehltePhase} compact={compact} />
-              {onPhaseBearbeiten && (
-                <Button
-                  variant="outlined"
-                  size={compact ? "small" : "medium"}
-                  startIcon={<EditIcon />}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onPhaseBearbeiten(ausgewaehltePhase);
-                  }}
-                >
-                  Diese Phase als neue Phase bearbeiten
-                </Button>
+              {(onPhaseBearbeiten || onPhaseLoeschen) && (
+                <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
+                  {onPhaseBearbeiten && (
+                    <Button
+                      variant="outlined"
+                      size={compact ? "small" : "medium"}
+                      startIcon={<EditIcon />}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onPhaseBearbeiten(ausgewaehltePhase);
+                      }}
+                    >
+                      Phase direkt bearbeiten
+                    </Button>
+                  )}
+                  {onPhaseLoeschen && (
+                    <Button
+                      variant="outlined"
+                      color="error"
+                      size={compact ? "small" : "medium"}
+                      startIcon={<DeleteIcon />}
+                      disabled={phasen.length <= 1}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onPhaseLoeschen(ausgewaehltePhase);
+                      }}
+                    >
+                      Phase löschen
+                    </Button>
+                  )}
+                </Stack>
+              )}
+              {phasen.length <= 1 && onPhaseLoeschen && (
+                <Typography variant="caption" color="text.secondary">
+                  Die einzige vorhandene Phase kann nicht einzeln gelöscht werden. Dafür bitte die gesamte Verhandlung löschen.
+                </Typography>
               )}
             </>
           )}
@@ -1548,6 +1585,68 @@ export default function Verhandlungen({
     setVerhandlungsDialogOffen(true);
   }
 
+  async function verhandlungsphaseLoeschen(eintrag, phase) {
+    const phasen = gespeicherteVerhandlungsphasen(eintrag);
+    if (phasen.length <= 1) {
+      setFehler("Die einzige Verhandlungsphase kann nicht einzeln gelöscht werden. Bitte bei Bedarf die gesamte Verhandlung löschen.");
+      return;
+    }
+
+    if (!window.confirm(`${phaseBezeichnung(phase.nummer)} wirklich löschen? Die verbleibenden Phasen werden anschließend neu nummeriert.`)) {
+      return;
+    }
+
+    const verbleibendePhasen = phasen
+      .filter((eintragPhase) => eintragPhase.nummer !== phase.nummer)
+      .map((eintragPhase, index) => ({
+        ...eintragPhase,
+        nummer: index + 1,
+      }));
+    const letztePhase = verbleibendePhasen.at(-1);
+    if (!letztePhase) return;
+
+    const aktuellerStand = verhandlungsPhaseDaten(letztePhase.daten);
+    const status = statusNormalisieren(aktuellerStand.status);
+    const istBeendet = istAbgeschlossenerStatus(status);
+    const vorhandeneFrist = timestampZuDatum(eintrag?.dokumentLoeschdatum);
+    const dokumentLoeschdatum = istBeendet
+      ? (vorhandeneFrist || addiereTage(new Date()))
+      : null;
+
+    const aktualisierung = {
+      ...aktuellerStand,
+      status,
+      betragNachSkonto: betragNachSkonto(aktuellerStand),
+      verhandlungsphasen: verbleibendePhasen,
+      aktuelleVerhandlungsphase: letztePhase.nummer,
+      geaendertAm: serverTimestamp(),
+    };
+
+    if (istBeendet) {
+      aktualisierung.abgeschlossenAm = eintrag.abgeschlossenAm || serverTimestamp();
+      aktualisierung.dokumentLoeschdatum = Timestamp.fromDate(dokumentLoeschdatum);
+    } else {
+      aktualisierung.abgeschlossenAm = deleteField();
+      aktualisierung.dokumentLoeschdatum = deleteField();
+    }
+
+    try {
+      await updateDoc(doc(db, "verhandlungen", eintrag.id), aktualisierung);
+      await dokumentFristenSynchronisieren(eintrag.id, dokumentLoeschdatum);
+
+      if (verhandlungsBearbeitungsId === eintrag.id) {
+        setVerhandlungsDialogOffen(false);
+        setVerhandlungsFormular(leerVerhandlungsFormular);
+        setVerhandlungsBearbeitungsId(null);
+        setVerhandlungsBasisPhase(null);
+      }
+      setFehler("");
+    } catch (error) {
+      console.error(error);
+      setFehler("Die Verhandlungsphase konnte nicht gelöscht werden.");
+    }
+  }
+
   useEffect(() => {
     if (!initialNegotiationId) {
       initialNegotiationOpenedRef.current = "";
@@ -1669,6 +1768,71 @@ export default function Verhandlungen({
     };
 
     const neuePhaseDaten = verhandlungsPhaseDaten(daten);
+
+    if (verhandlungsBearbeitungsId && bisherigerEintrag && verhandlungsBasisPhase) {
+      const vorhandenePhasen = gespeicherteVerhandlungsphasen(bisherigerEintrag);
+      const phaseVorhanden = vorhandenePhasen.some(
+        (phase) => phase.nummer === Number(verhandlungsBasisPhase)
+      );
+
+      if (!phaseVorhanden) {
+        setSpeichert(false);
+        setFehler("Die ausgewählte Verhandlungsphase wurde nicht gefunden.");
+        return;
+      }
+
+      const aktualisiertePhasen = vorhandenePhasen.map((phase) =>
+        phase.nummer === Number(verhandlungsBasisPhase)
+          ? { ...phase, bearbeitetAm: Timestamp.now(), daten: neuePhaseDaten }
+          : phase
+      );
+      const aktuelleNummer = aktuelleVerhandlungsphaseNummer(bisherigerEintrag);
+      const bearbeitetAktuellePhase = Number(verhandlungsBasisPhase) === aktuelleNummer;
+
+      try {
+        if (bearbeitetAktuellePhase) {
+          daten.verhandlungsphasen = aktualisiertePhasen;
+          daten.aktuelleVerhandlungsphase = aktuelleNummer;
+
+          if (istBeendet) {
+            daten.abgeschlossenAm = bisherigerEintrag?.abgeschlossenAm || serverTimestamp();
+            daten.dokumentLoeschdatum = Timestamp.fromDate(dokumentLoeschdatum);
+          } else {
+            daten.abgeschlossenAm = deleteField();
+            daten.dokumentLoeschdatum = deleteField();
+          }
+
+          await updateDoc(
+            doc(db, "verhandlungen", verhandlungsBearbeitungsId),
+            daten
+          );
+          await dokumentFristenSynchronisieren(
+            verhandlungsBearbeitungsId,
+            dokumentLoeschdatum
+          );
+        } else {
+          await updateDoc(
+            doc(db, "verhandlungen", verhandlungsBearbeitungsId),
+            {
+              verhandlungsphasen: aktualisiertePhasen,
+              geaendertAm: serverTimestamp(),
+            }
+          );
+        }
+
+        setVerhandlungsDialogOffen(false);
+        setVerhandlungsFormular(leerVerhandlungsFormular);
+        setVerhandlungsBearbeitungsId(null);
+        setVerhandlungsBasisPhase(null);
+        setFehler("");
+      } catch (error) {
+        console.error(error);
+        setFehler("Die Verhandlungsphase konnte nicht gespeichert werden.");
+      } finally {
+        setSpeichert(false);
+      }
+      return;
+    }
 
     if (verhandlungsBearbeitungsId && bisherigerEintrag) {
       const vorhandenePhasen = gespeicherteVerhandlungsphasen(bisherigerEintrag);
@@ -2918,7 +3082,11 @@ export default function Verhandlungen({
                       </Paper>
                     )}
 
-                    <VerhandlungsphasenHistorie eintrag={eintrag} onPhaseBearbeiten={(phase) => verhandlungBearbeitenOeffnen(eintrag, phase)} />
+                    <VerhandlungsphasenHistorie
+                      eintrag={eintrag}
+                      onPhaseBearbeiten={(phase) => verhandlungBearbeitenOeffnen(eintrag, phase)}
+                      onPhaseLoeschen={(phase) => verhandlungsphaseLoeschen(eintrag, phase)}
+                    />
 
                     {eintrag.notizen && (
                       <Paper variant="outlined" sx={{ p: 1.5, mt: 1.5 }}>
@@ -3341,7 +3509,12 @@ export default function Verhandlungen({
                             <Typography sx={{ mt: 0.75 }} fontWeight={700}>
                               {eintrag.verhandlungsgegenstand || "Kein Verhandlungsgegenstand"}
                             </Typography>
-                            <VerhandlungsphasenHistorie eintrag={eintrag} compact onPhaseBearbeiten={(phase) => verhandlungBearbeitenOeffnen(eintrag, phase)} />
+                            <VerhandlungsphasenHistorie
+                              eintrag={eintrag}
+                              compact
+                              onPhaseBearbeiten={(phase) => verhandlungBearbeitenOeffnen(eintrag, phase)}
+                              onPhaseLoeschen={(phase) => verhandlungsphaseLoeschen(eintrag, phase)}
+                            />
                             <Typography variant="body2" color="text.secondary" sx={{ mt: 0.75 }}>
                               Für {eintrag.auftraggeberName || "keine Firma zugeordnet"}
                               {" · "}{phaseBezeichnung(aktuelleVerhandlungsphaseNummer(eintrag))}
@@ -3717,7 +3890,7 @@ export default function Verhandlungen({
       >
         <DialogTitle>
           {verhandlungsBearbeitungsId
-            ? `Verhandlung bearbeiten${verhandlungsBasisPhase ? ` – Basis: ${phaseBezeichnung(verhandlungsBasisPhase)}` : ""}`
+            ? `Verhandlung bearbeiten${verhandlungsBasisPhase ? ` – ${phaseBezeichnung(verhandlungsBasisPhase)} direkt bearbeiten` : ""}`
             : "Neue Verhandlung anlegen"}
         </DialogTitle>
         <DialogContent sx={{ pt: 2.5 }}>
@@ -3732,13 +3905,17 @@ export default function Verhandlungen({
                 <Grid size={{ xs: 12 }}>
                   <Alert severity={verhandlungsBasisPhase ? "warning" : "info"} sx={{ mb: 1.25 }}>
                     {verhandlungsBasisPhase
-                      ? `${phaseBezeichnung(verhandlungsBasisPhase)} wurde als Bearbeitungsbasis geladen. Beim Speichern wird die Historie nicht überschrieben, sondern bei einer Änderung eine neue ${phaseBezeichnung(aktuelleNummer + 1)} angelegt.`
-                      : `Aktueller Stand: ${phaseBezeichnung(aktuelleNummer)}. Sobald sich eines der Verhandlungsfelder ändert, wird der komplette neue Stand automatisch als ${phaseBezeichnung(aktuelleNummer + 1)} gespeichert.`}
+                      ? `${phaseBezeichnung(verhandlungsBasisPhase)} wird direkt nachträglich bearbeitet. Beim Speichern wird genau diese Phase aktualisiert und keine neue Phase erzeugt. Bei einer älteren Phase bleibt der aktuelle Endstand unverändert.`
+                      : `Aktueller Stand: ${phaseBezeichnung(aktuelleNummer)}. Änderungen am normalen aktuellen Stand erzeugen weiterhin automatisch eine neue ${phaseBezeichnung(aktuelleNummer + 1)}.`}
                   </Alert>
                   <VerhandlungsphasenHistorie
                     eintrag={eintrag}
+                    allePhasen
                     onPhaseBearbeiten={(phase) =>
                       verhandlungBearbeitenOeffnen(eintrag, phase)
+                    }
+                    onPhaseLoeschen={(phase) =>
+                      verhandlungsphaseLoeschen(eintrag, phase)
                     }
                   />
                 </Grid>
