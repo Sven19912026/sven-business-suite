@@ -109,6 +109,8 @@ const leerVerhandlungsFormular = {
   lieferantId: "",
   firma: "",
   verhandlungsgegenstand: "",
+  vereinbarungen: "",
+  vereinbarungenEinsparung: "",
   ansprechpartner: "",
   telefon: "",
   email: "",
@@ -260,6 +262,8 @@ const VERHANDLUNGS_PHASE_FELDER = [
   "lieferantId",
   "firma",
   "verhandlungsgegenstand",
+  "vereinbarungen",
+  "vereinbarungenEinsparung",
   "ansprechpartner",
   "telefon",
   "email",
@@ -290,7 +294,7 @@ function verhandlungsPhaseDaten(eintrag = {}) {
 
     if (feld === "status") wert = statusNormalisieren(wert);
     if (feld === "angeliefert") wert = wert === true;
-    if (["ausgangsangebot", "aktuellesAngebot", "zielpreis", "schmerzgrenze"].includes(feld)) {
+    if (["ausgangsangebot", "aktuellesAngebot", "vereinbarungenEinsparung", "zielpreis", "schmerzgrenze"].includes(feld)) {
       wert = euroWert(wert);
     }
     if (feld === "skonto") wert = prozentWert(wert);
@@ -478,6 +482,16 @@ function VerhandlungsphaseDetails({ phase, compact = false }) {
             {daten.verhandlungsgegenstand || "—"}
           </Typography>
         </Grid>
+        <Grid size={{ xs: 12, sm: 8 }}>
+          <Typography variant="caption" color="text.secondary">Vereinbarungen / Zugaben / Kontingente</Typography>
+          <Typography sx={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
+            {daten.vereinbarungen || "—"}
+          </Typography>
+        </Grid>
+        <Grid size={{ xs: 12, sm: 4 }}>
+          <Typography variant="caption" color="text.secondary">Einsparung Vereinbarungen</Typography>
+          <Typography fontWeight={800} color="success.main">{euroFormat(vereinbarungenEinsparungWert(daten))}</Typography>
+        </Grid>
         <Grid size={{ xs: 12, sm: 4 }}>
           <Typography variant="caption" color="text.secondary">Ansprechpartner</Typography>
           <Typography>{daten.ansprechpartner || "—"}</Typography>
@@ -539,8 +553,12 @@ function VerhandlungsphaseDetails({ phase, compact = false }) {
           <Typography fontWeight={700}>{datumFormat(daten.wiedervorlage)}</Typography>
         </Grid>
         <Grid size={{ xs: 12, sm: 6 }}>
-          <Typography variant="caption" color="text.secondary">Einsparung</Typography>
-          <Typography fontWeight={800} color="success.main">{euroFormat(einsparung(daten))}</Typography>
+          <Typography variant="caption" color="text.secondary">Nachlass inkl. Skonto</Typography>
+          <Typography fontWeight={800}>{euroFormat(nachlassEinsparung(daten))}</Typography>
+        </Grid>
+        <Grid size={{ xs: 12, sm: 6 }}>
+          <Typography variant="caption" color="text.secondary">Gesamtersparnis</Typography>
+          <Typography fontWeight={900} color="success.main">{euroFormat(einsparung(daten))}</Typography>
         </Grid>
         {daten.notizen && (
           <Grid size={{ xs: 12 }}>
@@ -697,6 +715,8 @@ function verhandlungsFormularAusDaten(daten = {}) {
     lieferantId: daten.lieferantId ?? "",
     firma: daten.firma ?? "",
     verhandlungsgegenstand: daten.verhandlungsgegenstand ?? "",
+    vereinbarungen: daten.vereinbarungen ?? "",
+    vereinbarungenEinsparung: daten.vereinbarungenEinsparung ?? "",
     ansprechpartner: daten.ansprechpartner ?? "",
     telefon: daten.telefon ?? "",
     email: daten.email ?? "",
@@ -851,11 +871,19 @@ function heuteText() {
   ].join("-");
 }
 
-function einsparung(eintrag) {
+function nachlassEinsparung(eintrag) {
   return Math.max(
     euroWert(eintrag.ausgangsangebot) - betragNachSkonto(eintrag),
     0
   );
+}
+
+function vereinbarungenEinsparungWert(eintrag) {
+  return Math.max(euroWert(eintrag.vereinbarungenEinsparung), 0);
+}
+
+function einsparung(eintrag) {
+  return nachlassEinsparung(eintrag) + vereinbarungenEinsparungWert(eintrag);
 }
 function statusNormalisieren(status) {
   if (status === "Gewonnen" || status === "Verloren") {
@@ -970,12 +998,6 @@ function prozentFormat(wert) {
     minimumFractionDigits: 1,
     maximumFractionDigits: 2,
   }).format(sicher)} %`;
-}
-
-function einsparungProzent(eintrag) {
-  const ausgang = euroWert(eintrag.ausgangsangebot);
-  if (ausgang <= 0) return 0;
-  return (einsparung(eintrag) / ausgang) * 100;
 }
 
 function preisvergleich(ausgangswert, zielwert) {
@@ -1252,6 +1274,7 @@ export default function Verhandlungen({
         eintrag.verhandlungsgegenstand
           ?.toLowerCase()
           .includes(suchbegriff) ||
+        eintrag.vereinbarungen?.toLowerCase().includes(suchbegriff) ||
         eintrag.ansprechpartner?.toLowerCase().includes(suchbegriff) ||
         eintrag.kategorie?.toLowerCase().includes(suchbegriff) ||
         eintrag.email?.toLowerCase().includes(suchbegriff) ||
@@ -1627,6 +1650,8 @@ export default function Verhandlungen({
       kategorie: String(verhandlungsFormular.kategorie || "").trim() || "Sonstiges",
       auftraggeberName: verhandlungsFormular.auftraggeberName.trim(),
       verhandlungsgegenstand: neuerVerhandlungsgegenstand,
+      vereinbarungen: String(verhandlungsFormular.vereinbarungen || "").trim(),
+      vereinbarungenEinsparung: euroWert(verhandlungsFormular.vereinbarungenEinsparung),
       notizen: cleanRichTextForStorage(verhandlungsFormular.notizen),
       userId: benutzer.uid,
       ausgangsangebot: euroWert(verhandlungsFormular.ausgangsangebot),
@@ -2172,11 +2197,11 @@ export default function Verhandlungen({
     const zeilen = auswahl.map((eintrag) => `
       <tr>
         <td>${htmlSicher(eintrag.status)}<br><small>${htmlSicher(eintrag.verhandlungstag ? datumFormat(eintrag.verhandlungstag) : "Kein Verhandlungstag")}</small></td>
-        <td><small>Für: ${htmlSicher(eintrag.auftraggeberName || "—")}</small><br><strong>${htmlSicher(eintrag.firma)}</strong><br>${htmlSicher(eintrag.verhandlungsgegenstand || "Kein Gegenstand hinterlegt")}</td>
+        <td><small>Für: ${htmlSicher(eintrag.auftraggeberName || "—")}</small><br><strong>${htmlSicher(eintrag.firma)}</strong><br>${htmlSicher(eintrag.verhandlungsgegenstand || "Kein Gegenstand hinterlegt")}${eintrag.vereinbarungen ? `<br><small><strong>Vereinbarungen:</strong> ${htmlSicherMitZeilenumbruechen(eintrag.vereinbarungen)}</small>` : ""}</td>
         <td><strong>${htmlSicher(eintrag.ansprechpartner || "—")}</strong><br><small>${htmlSicher(eintrag.telefon || "Keine Telefonnummer")}<br>${htmlSicher(eintrag.email || "Keine E-Mail")}</small></td>
         <td>${htmlSicher(lieferterminAnzeige(eintrag))}</td>
         <td>${htmlSicher(eintrag.wiedervorlage ? datumFormat(eintrag.wiedervorlage) : "—")}</td>
-        <td>${htmlSicher(euroFormat(eintrag.aktuellesAngebot))}<br><small>Skonto: ${htmlSicher(prozentFormat(prozentWert(eintrag.skonto)))} · nach Skonto: ${htmlSicher(euroFormat(betragNachSkonto(eintrag)))}</small><br><small>Ersparnis: ${htmlSicher(euroFormat(einsparung(eintrag)))} (${htmlSicher(prozentFormat(einsparungProzent(eintrag)))})</small></td>
+        <td>${htmlSicher(euroFormat(eintrag.aktuellesAngebot))}<br><small>Skonto: ${htmlSicher(prozentFormat(prozentWert(eintrag.skonto)))} · nach Skonto: ${htmlSicher(euroFormat(betragNachSkonto(eintrag)))}</small><br><small>Nachlass: ${htmlSicher(euroFormat(nachlassEinsparung(eintrag)))} · Vereinbarungen: ${htmlSicher(euroFormat(vereinbarungenEinsparungWert(eintrag)))}</small><br><strong>Gesamtersparnis: ${htmlSicher(euroFormat(einsparung(eintrag)))}</strong></td>
         <td>${htmlSicherMitZeilenumbruechen(richTextToPlainText(eintrag.notizen) || "—")}</td>
       </tr>`).join("");
     const druckHtml = `<!doctype html><html><head><meta charset="utf-8"><title>Urlaubsübergabe Verhandlungen</title><style>body{font-family:Arial,sans-serif;color:#172033;margin:28px}h1{margin:0 0 6px}.meta{color:#667085;margin-bottom:22px}table{width:100%;border-collapse:collapse;font-size:11px}th,td{border:1px solid #d0d5dd;padding:8px;vertical-align:top;text-align:left}th{background:#f2f4f7}tr{page-break-inside:avoid}@page{size:landscape;margin:10mm}@media print{body{margin:0}}</style></head><body><h1>Urlaubsübergabe – Verhandlungen</h1><div class="meta">Erstellt am ${new Date().toLocaleString("de-DE")} · ${auswahl.length} ausgewählte Verhandlung(en)</div><table><thead><tr><th>Status</th><th>Firma / Gegenstand</th><th>Ansprechpartner / Kontakt</th><th>Liefertermin</th><th>Wiedervorlage</th><th>Aktueller Stand</th><th>Notizen</th></tr></thead><tbody>${zeilen}</tbody></table></body></html>`;
@@ -2608,7 +2633,7 @@ export default function Verhandlungen({
                 <TextField
                   fullWidth
                   label="Suchen"
-                  placeholder="Auftraggeber, Lieferant, Verhandlungsgegenstand, Ansprechpartner oder Notiz"
+                  placeholder="Auftraggeber, Lieferant, Gegenstand, Vereinbarungen, Ansprechpartner oder Notiz"
                   value={suche}
                   onChange={(event) => setSuche(event.target.value)}
                   slotProps={{
@@ -2879,6 +2904,20 @@ export default function Verhandlungen({
                       </Typography>
                     </Paper>
 
+                    {(eintrag.vereinbarungen || vereinbarungenEinsparungWert(eintrag) > 0) && (
+                      <Paper variant="outlined" sx={{ p: 1.5, mt: 1.5, bgcolor: "success.50" }}>
+                        <Typography variant="caption" color="text.secondary" fontWeight={700}>
+                          Vereinbarungen / Zugaben / Kontingente
+                        </Typography>
+                        <Typography sx={{ mt: 0.25, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
+                          {eintrag.vereinbarungen || "Keine Beschreibung hinterlegt"}
+                        </Typography>
+                        <Typography variant="body2" color="success.main" fontWeight={800} sx={{ mt: 0.75 }}>
+                          Einsparung / Gegenwert: {euroFormat(vereinbarungenEinsparungWert(eintrag))}
+                        </Typography>
+                      </Paper>
+                    )}
+
                     <VerhandlungsphasenHistorie eintrag={eintrag} onPhaseBearbeiten={(phase) => verhandlungBearbeitenOeffnen(eintrag, phase)} />
 
                     {eintrag.notizen && (
@@ -2943,17 +2982,26 @@ export default function Verhandlungen({
                       </Grid>
                       <Grid size={{ xs: 6 }}>
                         <Typography variant="caption" color="text.secondary">
-                          Einsparung
+                          Nachlass inkl. Skonto
                         </Typography>
-                        <Typography fontWeight={800} color="success.main">
+                        <Typography fontWeight={800}>
+                          {euroFormat(nachlassEinsparung(eintrag))}
+                        </Typography>
+                      </Grid>
+                      <Grid size={{ xs: 6 }}>
+                        <Typography variant="caption" color="text.secondary">
+                          Vereinbarungen / Zugaben
+                        </Typography>
+                        <Typography fontWeight={800}>
+                          {euroFormat(vereinbarungenEinsparungWert(eintrag))}
+                        </Typography>
+                      </Grid>
+                      <Grid size={{ xs: 12 }}>
+                        <Typography variant="caption" color="text.secondary">
+                          Gesamtersparnis
+                        </Typography>
+                        <Typography fontWeight={900} color="success.main">
                           {euroFormat(einsparung(eintrag))}
-                        </Typography>
-                        <Typography
-                          variant="caption"
-                          color="success.main"
-                          fontWeight={700}
-                        >
-                          {prozentFormat(einsparungProzent(eintrag))}
                         </Typography>
                       </Grid>
                       <Grid size={{ xs: 12, sm: 6 }}>
@@ -3056,7 +3104,7 @@ export default function Verhandlungen({
                     <TableCell>Priorität</TableCell>
                     <TableCell align="right">Ausgang</TableCell>
                     <TableCell align="right">Verhandelt</TableCell>
-                    <TableCell align="right">Einsparung</TableCell>
+                    <TableCell align="right">Gesamtersparnis</TableCell>
                     <TableCell>Liefertermin</TableCell>
                     <TableCell>Wiedervorlage</TableCell>
                     <TableCell align="right">Aktionen</TableCell>
@@ -3116,6 +3164,21 @@ export default function Verhandlungen({
                             Verhandlungsphasen ansehen
                           </Button>
                         )}
+                        {(eintrag.vereinbarungen || vereinbarungenEinsparungWert(eintrag) > 0) && (
+                          <Box sx={{ mt: 0.75, pt: 0.75, borderTop: 1, borderColor: 'divider' }}>
+                            <Typography variant="caption" color="text.secondary" fontWeight={700}>
+                              Vereinbarungen / Zugaben
+                            </Typography>
+                            {eintrag.vereinbarungen && (
+                              <Typography variant="caption" sx={{ display: "block", whiteSpace: "normal", overflowWrap: "anywhere" }}>
+                                {eintrag.vereinbarungen}
+                              </Typography>
+                            )}
+                            <Typography variant="caption" color="success.main" fontWeight={800}>
+                              + {euroFormat(vereinbarungenEinsparungWert(eintrag))}
+                            </Typography>
+                          </Box>
+                        )}
                         {eintrag.notizen && (
                           <Box sx={{ mt: 0.75, pt: 0.75, borderTop: 1, borderColor: 'divider' }}>
                             <Typography variant="caption" color="text.secondary" fontWeight={700}>
@@ -3155,11 +3218,14 @@ export default function Verhandlungen({
                         </Typography>
                       </TableCell>
                       <TableCell align="right">
-                        <Typography fontWeight={800} color="success.main">
+                        <Typography fontWeight={900} color="success.main">
                           {euroFormat(einsparung(eintrag))}
                         </Typography>
-                        <Typography variant="caption" color="success.main" fontWeight={700}>
-                          {prozentFormat(einsparungProzent(eintrag))}
+                        <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
+                          Nachlass: {euroFormat(nachlassEinsparung(eintrag))}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
+                          Vereinbarungen: {euroFormat(vereinbarungenEinsparungWert(eintrag))}
                         </Typography>
                       </TableCell>
                       <TableCell>
@@ -3280,7 +3346,7 @@ export default function Verhandlungen({
                               Für {eintrag.auftraggeberName || "keine Firma zugeordnet"}
                               {" · "}{phaseBezeichnung(aktuelleVerhandlungsphaseNummer(eintrag))}
                               {" · "}Liefertermin: {lieferterminAnzeige(eintrag)}
-                              {" · "}Einsparung: {euroFormat(einsparung(eintrag))}
+                              {" · "}Gesamtersparnis: {euroFormat(einsparung(eintrag))}
                             </Typography>
                           </Box>
                           <Stack direction="row" spacing={0.5} justifyContent="flex-end">
@@ -3737,6 +3803,31 @@ export default function Verhandlungen({
                 }
               />
             </Grid>
+            <Grid size={{ xs: 12, md: 8 }}>
+              <TextField
+                fullWidth
+                label="Vereinbarungen / Zugaben / Kontingente"
+                name="vereinbarungen"
+                value={verhandlungsFormular.vereinbarungen}
+                onChange={verhandlungsFeldAendern}
+                multiline
+                minRows={2}
+                placeholder="z. B. kostenlose Zusatzmenge, Freikontingent, Gratislieferung oder sonstige Zugabe"
+                helperText="Der geldwerte Vorteil kann rechts separat als Einsparung erfasst werden."
+              />
+            </Grid>
+            <Grid size={{ xs: 12, md: 4 }}>
+              <TextField
+                fullWidth
+                label="Einsparung Vereinbarungen (€)"
+                type="number"
+                name="vereinbarungenEinsparung"
+                value={verhandlungsFormular.vereinbarungenEinsparung}
+                onChange={verhandlungsFeldAendern}
+                inputProps={{ min: 0, step: 0.01 }}
+                helperText="Wird zur Nachlass-Einsparung addiert."
+              />
+            </Grid>
             <Grid size={{ xs: 12, md: 6 }}>
               <TextField
                 fullWidth
@@ -3869,17 +3960,30 @@ export default function Verhandlungen({
             <Grid size={{ xs: 12 }}>
               <Paper variant="outlined" sx={{ p: 2, bgcolor: "action.hover" }}>
                 <Grid container spacing={2}>
-                  <Grid size={{ xs: 12, sm: 4 }}>
+                  <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
                     <Typography variant="caption" color="text.secondary" fontWeight={800}>SKONTOABZUG</Typography>
                     <Typography fontWeight={850}>{euroFormat(skontoAbzug(verhandlungsFormular))}</Typography>
                   </Grid>
-                  <Grid size={{ xs: 12, sm: 4 }}>
+                  <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
                     <Typography variant="caption" color="text.secondary" fontWeight={800}>BETRAG NACH SKONTO</Typography>
                     <Typography fontWeight={900} color="primary.main">{euroFormat(betragNachSkonto(verhandlungsFormular))}</Typography>
                   </Grid>
-                  <Grid size={{ xs: 12, sm: 4 }}>
-                    <Typography variant="caption" color="text.secondary" fontWeight={800}>GESAMTERSPARNIS</Typography>
-                    <Typography fontWeight={900} color="success.main">{euroFormat(einsparung(verhandlungsFormular))}</Typography>
+                  <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
+                    <Typography variant="caption" color="text.secondary" fontWeight={800}>NACHLASS INKL. SKONTO</Typography>
+                    <Typography fontWeight={850}>{euroFormat(nachlassEinsparung(verhandlungsFormular))}</Typography>
+                  </Grid>
+                  <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
+                    <Typography variant="caption" color="text.secondary" fontWeight={800}>VEREINBARUNGEN / ZUGABEN</Typography>
+                    <Typography fontWeight={850}>{euroFormat(vereinbarungenEinsparungWert(verhandlungsFormular))}</Typography>
+                  </Grid>
+                  <Grid size={{ xs: 12 }}>
+                    <Divider sx={{ my: 0.5 }} />
+                    <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={2}>
+                      <Typography fontWeight={900}>GESAMTERSPARNIS</Typography>
+                      <Typography variant="h6" fontWeight={950} color="success.main">
+                        {euroFormat(einsparung(verhandlungsFormular))}
+                      </Typography>
+                    </Stack>
                   </Grid>
                 </Grid>
               </Paper>
