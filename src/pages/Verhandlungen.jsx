@@ -253,6 +253,111 @@ function zeitpunktFormat(wert) {
   });
 }
 
+const VERHANDLUNGS_PHASE_FELDER = [
+  "auftraggeberId",
+  "auftraggeberName",
+  "verhandlungstag",
+  "lieferantId",
+  "firma",
+  "verhandlungsgegenstand",
+  "ansprechpartner",
+  "telefon",
+  "email",
+  "kategorie",
+  "status",
+  "prioritaet",
+  "ausgangsangebot",
+  "aktuellesAngebot",
+  "skonto",
+  "zielpreis",
+  "schmerzgrenze",
+  "lieferterminArt",
+  "lieferterminDatum",
+  "lieferterminMonat",
+  "lieferterminQuartal",
+  "lieferterminJahr",
+  "liefertermin",
+  "angeliefert",
+  "wiedervorlage",
+  "notizen",
+];
+
+function verhandlungsPhaseDaten(eintrag = {}) {
+  const daten = {};
+
+  VERHANDLUNGS_PHASE_FELDER.forEach((feld) => {
+    let wert = eintrag?.[feld];
+
+    if (feld === "status") wert = statusNormalisieren(wert);
+    if (feld === "angeliefert") wert = wert === true;
+    if (["ausgangsangebot", "aktuellesAngebot", "zielpreis", "schmerzgrenze"].includes(feld)) {
+      wert = euroWert(wert);
+    }
+    if (feld === "skonto") wert = prozentWert(wert);
+    if (feld === "notizen") wert = cleanRichTextForStorage(wert || "");
+
+    daten[feld] = wert ?? "";
+  });
+
+  const lieferArt = lieferterminArtErmitteln(eintrag, "liefertermin");
+  daten.lieferterminArt = lieferArt;
+  if (lieferArt === "datum") {
+    const datum = eintrag?.lieferterminDatum || eintrag?.liefertermin || "";
+    daten.lieferterminDatum = datum;
+    daten.liefertermin = datum;
+    daten.lieferterminMonat = "";
+    daten.lieferterminQuartal = "";
+    daten.lieferterminJahr = "";
+  } else if (lieferArt === "monat") {
+    daten.lieferterminDatum = "";
+    daten.liefertermin = "";
+    daten.lieferterminMonat = eintrag?.lieferterminMonat || "";
+    daten.lieferterminQuartal = "";
+    daten.lieferterminJahr = "";
+  } else {
+    daten.lieferterminDatum = "";
+    daten.liefertermin = "";
+    daten.lieferterminMonat = "";
+    daten.lieferterminQuartal = String(eintrag?.lieferterminQuartal || "1").replace(/^Q/i, "");
+    daten.lieferterminJahr = eintrag?.lieferterminJahr || "";
+  }
+
+  return daten;
+}
+
+function phasenDatenSindGleich(a, b) {
+  const links = verhandlungsPhaseDaten(a);
+  const rechts = verhandlungsPhaseDaten(b);
+  return VERHANDLUNGS_PHASE_FELDER.every(
+    (feld) => JSON.stringify(links[feld]) === JSON.stringify(rechts[feld])
+  );
+}
+
+function gespeicherteVerhandlungsphasen(eintrag) {
+  if (!Array.isArray(eintrag?.verhandlungsphasen)) return [];
+
+  return eintrag.verhandlungsphasen
+    .map((phase, index) => ({
+      nummer: Number(phase?.nummer) || index + 1,
+      gespeichertAm: phase?.gespeichertAm ?? phase?.erstelltAm ?? null,
+      daten: verhandlungsPhaseDaten(phase?.daten ?? phase ?? {}),
+    }))
+    .sort((a, b) => a.nummer - b.nummer);
+}
+
+function aktuelleVerhandlungsphaseNummer(eintrag) {
+  const phasen = gespeicherteVerhandlungsphasen(eintrag);
+  if (Number(eintrag?.aktuelleVerhandlungsphase) > 0) {
+    return Number(eintrag.aktuelleVerhandlungsphase);
+  }
+  if (phasen.length > 0) return phasen[phasen.length - 1].nummer;
+  return 1;
+}
+
+function phaseBezeichnung(nummer) {
+  return `${nummer}. Verhandlungsphase`;
+}
+
 function verhandlungsgegenstandHistorie(eintrag) {
   if (!Array.isArray(eintrag?.verhandlungsgegenstandHistorie)) return [];
 
@@ -264,7 +369,7 @@ function verhandlungsgegenstandHistorie(eintrag) {
     .filter((item) => item.stand);
 }
 
-function VerhandlungsgegenstandHistorie({ eintrag, compact = false }) {
+function AlteGegenstandsHistorie({ eintrag, compact = false }) {
   const historie = verhandlungsgegenstandHistorie(eintrag);
   if (historie.length === 0) return null;
 
@@ -287,19 +392,18 @@ function VerhandlungsgegenstandHistorie({ eintrag, compact = false }) {
         }}
       >
         <Typography variant={compact ? "caption" : "body2"} fontWeight={800}>
-          Frühere Stände ({historie.length})
+          Ältere Gegenstands-Historie ({historie.length})
         </Typography>
       </AccordionSummary>
       <AccordionDetails sx={{ px: compact ? 1 : 1.5, pt: 0, pb: 1.25 }}>
+        <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
+          Diese Einträge stammen aus der bisherigen Historie vor Einführung der vollständigen Verhandlungsphasen.
+        </Typography>
         <Stack spacing={1}>
           {[...historie].reverse().map((item, index) => (
             <Box
               key={`${item.stand}-${index}`}
-              sx={{
-                pl: 1.25,
-                borderLeft: "3px solid",
-                borderColor: "divider",
-              }}
+              sx={{ pl: 1.25, borderLeft: "3px solid", borderColor: "divider" }}
             >
               <Typography
                 variant={compact ? "caption" : "body2"}
@@ -312,6 +416,222 @@ function VerhandlungsgegenstandHistorie({ eintrag, compact = false }) {
               </Typography>
             </Box>
           ))}
+        </Stack>
+      </AccordionDetails>
+    </Accordion>
+  );
+}
+
+function phasenStatusFarbe(status) {
+  const normalisiert = statusNormalisieren(status);
+  if (normalisiert === "Abgeschlossen" || normalisiert === "Geliefert") return "success";
+  if (normalisiert === "Offen" || normalisiert === "Abgebrochen") return "error";
+  if (normalisiert === "In Verhandlung" || normalisiert === "Bestellt") return "warning";
+  return "info";
+}
+
+function phasenPrioritaetsFarbe(prioritaet) {
+  if (prioritaet === "Hoch") return "error";
+  if (prioritaet === "Mittel") return "warning";
+  return "default";
+}
+
+function VerhandlungsphaseDetails({ phase, compact = false }) {
+  if (!phase?.daten) return null;
+  const daten = phase.daten;
+
+  return (
+    <Paper variant="outlined" sx={{ p: compact ? 1.25 : 1.75, bgcolor: "action.hover" }}>
+      <Stack
+        direction={{ xs: "column", sm: "row" }}
+        justifyContent="space-between"
+        alignItems={{ xs: "flex-start", sm: "center" }}
+        spacing={0.5}
+        sx={{ mb: 1.25 }}
+      >
+        <Typography fontWeight={900}>{phaseBezeichnung(phase.nummer)}</Typography>
+        <Typography variant="caption" color="text.secondary">
+          Gespeichert: {zeitpunktFormat(phase.gespeichertAm)}
+        </Typography>
+      </Stack>
+
+      <Grid container spacing={compact ? 1 : 1.5}>
+        <Grid size={{ xs: 12, sm: 6 }}>
+          <Typography variant="caption" color="text.secondary">Für Firma</Typography>
+          <Typography fontWeight={700}>{daten.auftraggeberName || "—"}</Typography>
+        </Grid>
+        <Grid size={{ xs: 12, sm: 6 }}>
+          <Typography variant="caption" color="text.secondary">Verhandlungstag</Typography>
+          <Typography fontWeight={700}>{datumFormat(daten.verhandlungstag)}</Typography>
+        </Grid>
+        <Grid size={{ xs: 12, sm: 6 }}>
+          <Typography variant="caption" color="text.secondary">Lieferant / Firma</Typography>
+          <Typography fontWeight={700}>{daten.firma || "—"}</Typography>
+        </Grid>
+        <Grid size={{ xs: 12, sm: 6 }}>
+          <Typography variant="caption" color="text.secondary">Kategorie</Typography>
+          <Typography fontWeight={700}>{daten.kategorie || "—"}</Typography>
+        </Grid>
+        <Grid size={{ xs: 12 }}>
+          <Typography variant="caption" color="text.secondary">Verhandlungsgegenstand</Typography>
+          <Typography fontWeight={800} sx={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
+            {daten.verhandlungsgegenstand || "—"}
+          </Typography>
+        </Grid>
+        <Grid size={{ xs: 12, sm: 4 }}>
+          <Typography variant="caption" color="text.secondary">Ansprechpartner</Typography>
+          <Typography>{daten.ansprechpartner || "—"}</Typography>
+        </Grid>
+        <Grid size={{ xs: 12, sm: 4 }}>
+          <Typography variant="caption" color="text.secondary">Telefon</Typography>
+          <Typography>{daten.telefon || "—"}</Typography>
+        </Grid>
+        <Grid size={{ xs: 12, sm: 4 }}>
+          <Typography variant="caption" color="text.secondary">E-Mail</Typography>
+          <Typography sx={{ overflowWrap: "anywhere" }}>{daten.email || "—"}</Typography>
+        </Grid>
+        <Grid size={{ xs: 6, sm: 3 }}>
+          <Typography variant="caption" color="text.secondary">Status</Typography>
+          <Box sx={{ mt: 0.35 }}>
+            <Chip size="small" label={statusNormalisieren(daten.status)} color={phasenStatusFarbe(daten.status)} />
+          </Box>
+        </Grid>
+        <Grid size={{ xs: 6, sm: 3 }}>
+          <Typography variant="caption" color="text.secondary">Priorität</Typography>
+          <Box sx={{ mt: 0.35 }}>
+            <Chip size="small" label={daten.prioritaet || "—"} color={phasenPrioritaetsFarbe(daten.prioritaet)} />
+          </Box>
+        </Grid>
+        <Grid size={{ xs: 6, sm: 3 }}>
+          <Typography variant="caption" color="text.secondary">Ausgang</Typography>
+          <Typography fontWeight={700}>{euroFormat(daten.ausgangsangebot)}</Typography>
+        </Grid>
+        <Grid size={{ xs: 6, sm: 3 }}>
+          <Typography variant="caption" color="text.secondary">Verhandelt</Typography>
+          <Typography fontWeight={700}>{euroFormat(daten.aktuellesAngebot)}</Typography>
+        </Grid>
+        <Grid size={{ xs: 6, sm: 3 }}>
+          <Typography variant="caption" color="text.secondary">Skonto</Typography>
+          <Typography fontWeight={700}>{prozentFormat(prozentWert(daten.skonto))}</Typography>
+        </Grid>
+        <Grid size={{ xs: 6, sm: 3 }}>
+          <Typography variant="caption" color="text.secondary">Nach Skonto</Typography>
+          <Typography fontWeight={700}>{euroFormat(betragNachSkonto(daten))}</Typography>
+        </Grid>
+        <Grid size={{ xs: 6, sm: 3 }}>
+          <Typography variant="caption" color="text.secondary">Zielpreis</Typography>
+          <Typography fontWeight={700}>{euroFormat(daten.zielpreis)}</Typography>
+        </Grid>
+        <Grid size={{ xs: 6, sm: 3 }}>
+          <Typography variant="caption" color="text.secondary">Schmerzgrenze</Typography>
+          <Typography fontWeight={700}>{euroFormat(daten.schmerzgrenze)}</Typography>
+        </Grid>
+        <Grid size={{ xs: 12, sm: 6 }}>
+          <Typography variant="caption" color="text.secondary">Liefertermin</Typography>
+          <Typography fontWeight={700}>{lieferterminAnzeige(daten)}</Typography>
+        </Grid>
+        <Grid size={{ xs: 12, sm: 6 }}>
+          <Typography variant="caption" color="text.secondary">Lieferstatus</Typography>
+          <Box sx={{ mt: 0.35 }}><LieferstatusChip angeliefert={daten.angeliefert} /></Box>
+        </Grid>
+        <Grid size={{ xs: 12, sm: 6 }}>
+          <Typography variant="caption" color="text.secondary">Wiedervorlage</Typography>
+          <Typography fontWeight={700}>{datumFormat(daten.wiedervorlage)}</Typography>
+        </Grid>
+        <Grid size={{ xs: 12, sm: 6 }}>
+          <Typography variant="caption" color="text.secondary">Einsparung</Typography>
+          <Typography fontWeight={800} color="success.main">{euroFormat(einsparung(daten))}</Typography>
+        </Grid>
+        {daten.notizen && (
+          <Grid size={{ xs: 12 }}>
+            <Typography variant="caption" color="text.secondary" fontWeight={700}>Notizen</Typography>
+            <RichTextContent value={daten.notizen} sx={{ mt: 0.25, fontSize: compact ? "0.78rem" : "0.875rem" }} />
+          </Grid>
+        )}
+      </Grid>
+    </Paper>
+  );
+}
+
+function VerhandlungsphasenHistorie({ eintrag, compact = false, onPhaseBearbeiten }) {
+  const phasen = gespeicherteVerhandlungsphasen(eintrag);
+  const aktuelleNummer = aktuelleVerhandlungsphaseNummer(eintrag);
+  const frueherePhasen = phasen.filter((phase) => phase.nummer !== aktuelleNummer);
+  const [auswahl, setAuswahl] = useState("");
+  const effektiveAuswahl = frueherePhasen.some(
+    (phase) => phase.nummer === Number(auswahl)
+  )
+    ? Number(auswahl)
+    : (frueherePhasen.at(-1)?.nummer ?? "");
+
+  const ausgewaehltePhase = frueherePhasen.find(
+    (phase) => phase.nummer === Number(effektiveAuswahl)
+  );
+  const alteGegenstaende = verhandlungsgegenstandHistorie(eintrag);
+
+  if (frueherePhasen.length === 0) {
+    return alteGegenstaende.length > 0
+      ? <AlteGegenstandsHistorie eintrag={eintrag} compact={compact} />
+      : null;
+  }
+
+  return (
+    <Accordion
+      disableGutters
+      variant="outlined"
+      sx={{ mt: compact ? 0.75 : 1.25, "&:before": { display: "none" } }}
+    >
+      <AccordionSummary
+        expandIcon={<ExpandMoreIcon />}
+        sx={{
+          minHeight: compact ? 36 : 44,
+          px: compact ? 1 : 1.5,
+          "& .MuiAccordionSummary-content": { my: compact ? 0.5 : 0.75 },
+        }}
+      >
+        <Typography variant={compact ? "caption" : "body2"} fontWeight={850}>
+          Frühere Verhandlungsphasen ({frueherePhasen.length})
+        </Typography>
+      </AccordionSummary>
+      <AccordionDetails sx={{ px: compact ? 1 : 1.5, pt: 0, pb: 1.5 }}>
+        <Stack spacing={1.25}>
+          <TextField
+            select
+            size="small"
+            fullWidth
+            label="Phase auswählen"
+            value={effektiveAuswahl}
+            onChange={(event) => setAuswahl(Number(event.target.value))}
+          >
+            {[...frueherePhasen].reverse().map((phase) => (
+              <MenuItem key={phase.nummer} value={phase.nummer}>
+                {phaseBezeichnung(phase.nummer)} · {zeitpunktFormat(phase.gespeichertAm)}
+              </MenuItem>
+            ))}
+          </TextField>
+
+          {ausgewaehltePhase && (
+            <>
+              <VerhandlungsphaseDetails phase={ausgewaehltePhase} compact={compact} />
+              {onPhaseBearbeiten && (
+                <Button
+                  variant="outlined"
+                  size={compact ? "small" : "medium"}
+                  startIcon={<EditIcon />}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onPhaseBearbeiten(ausgewaehltePhase);
+                  }}
+                >
+                  Diese Phase als neue Phase bearbeiten
+                </Button>
+              )}
+            </>
+          )}
+
+          {alteGegenstaende.length > 0 && (
+            <AlteGegenstandsHistorie eintrag={eintrag} compact={compact} />
+          )}
         </Stack>
       </AccordionDetails>
     </Accordion>
@@ -366,6 +686,34 @@ function lieferterminSortierwert(eintrag, praefix = "liefertermin") {
     return `${jahr}-${String((quartal - 1) * 3 + 1).padStart(2, "0")}-01`;
   }
   return datum || "9999-12-31";
+}
+
+function verhandlungsFormularAusDaten(daten = {}) {
+  return {
+    ...leerVerhandlungsFormular,
+    auftraggeberId: daten.auftraggeberId ?? "",
+    auftraggeberName: daten.auftraggeberName ?? "",
+    verhandlungstag: daten.verhandlungstag ?? "",
+    lieferantId: daten.lieferantId ?? "",
+    firma: daten.firma ?? "",
+    verhandlungsgegenstand: daten.verhandlungsgegenstand ?? "",
+    ansprechpartner: daten.ansprechpartner ?? "",
+    telefon: daten.telefon ?? "",
+    email: daten.email ?? "",
+    kategorie: daten.kategorie ?? "Material",
+    status: statusNormalisieren(daten.status),
+    prioritaet: daten.prioritaet ?? "Mittel",
+    ausgangsangebot: daten.ausgangsangebot ?? "",
+    aktuellesAngebot: daten.aktuellesAngebot ?? "",
+    skonto: daten.skonto ?? "",
+    zielpreis: daten.zielpreis ?? "",
+    schmerzgrenze: daten.schmerzgrenze ?? "",
+    ...lieferterminFormularwerte(daten, "liefertermin"),
+    liefertermin: daten.liefertermin ?? "",
+    angeliefert: daten.angeliefert === true,
+    wiedervorlage: daten.wiedervorlage ?? "",
+    notizen: daten.notizen ?? "",
+  };
 }
 
 function LieferterminEingabe({
@@ -669,6 +1017,7 @@ export default function Verhandlungen({
   const [verhandlungsDialogOffen, setVerhandlungsDialogOffen] = useState(false);
   const [verhandlungsBearbeitungsId, setVerhandlungsBearbeitungsId] =
     useState(null);
+  const [verhandlungsBasisPhase, setVerhandlungsBasisPhase] = useState(null);
 
   const [lieferanten, setLieferanten] = useState([]);
   const [lieferantenFormular, setLieferantenFormular] = useState(
@@ -1162,37 +1511,16 @@ export default function Verhandlungen({
   function neueVerhandlungOeffnen() {
     setVerhandlungsFormular({ ...leerVerhandlungsFormular, verhandlungstag: heuteText() });
     setVerhandlungsBearbeitungsId(null);
+    setVerhandlungsBasisPhase(null);
     setFehler("");
     setVerhandlungsDialogOffen(true);
   }
 
-  function verhandlungBearbeitenOeffnen(eintrag) {
-    setVerhandlungsFormular({
-      auftraggeberId: eintrag.auftraggeberId ?? "",
-      auftraggeberName: eintrag.auftraggeberName ?? "",
-      verhandlungstag: eintrag.verhandlungstag ?? "",
-      lieferantId: eintrag.lieferantId ?? "",
-      firma: eintrag.firma ?? "",
-      verhandlungsgegenstand: eintrag.verhandlungsgegenstand ?? "",
-      ansprechpartner: eintrag.ansprechpartner ?? "",
-      telefon: eintrag.telefon ?? "",
-      email: eintrag.email ?? "",
-      kategorie: eintrag.kategorie ?? "Material",
-      status: statusNormalisieren(eintrag.status),
-      prioritaet: eintrag.prioritaet ?? "Mittel",
-      ausgangsangebot: eintrag.ausgangsangebot ?? "",
-      aktuellesAngebot: eintrag.aktuellesAngebot ?? "",
-      skonto: eintrag.skonto ?? "",
-      zielpreis: eintrag.zielpreis ?? "",
-      schmerzgrenze: eintrag.schmerzgrenze ?? "",
-      ...lieferterminFormularwerte(eintrag, "liefertermin"),
-      liefertermin: eintrag.liefertermin ?? "",
-      angeliefert: eintrag.angeliefert === true,
-      wiedervorlage: eintrag.wiedervorlage ?? "",
-      notizen: eintrag.notizen ?? "",
-    });
-
+  function verhandlungBearbeitenOeffnen(eintrag, phase = null) {
+    const basisDaten = phase?.daten ?? eintrag;
+    setVerhandlungsFormular(verhandlungsFormularAusDaten(basisDaten));
     setVerhandlungsBearbeitungsId(eintrag.id);
+    setVerhandlungsBasisPhase(phase?.nummer ?? null);
     setFehler("");
     setVerhandlungsDialogOffen(true);
   }
@@ -1291,25 +1619,6 @@ export default function Verhandlungen({
 
     const neuerVerhandlungsgegenstand =
       verhandlungsFormular.verhandlungsgegenstand.trim();
-    const bisherigerVerhandlungsgegenstand = String(
-      bisherigerEintrag?.verhandlungsgegenstand ?? ""
-    ).trim();
-    const vorhandeneGegenstandHistorie =
-      verhandlungsgegenstandHistorie(bisherigerEintrag);
-    const gegenstandWurdeGeaendert = Boolean(
-      verhandlungsBearbeitungsId &&
-      bisherigerVerhandlungsgegenstand &&
-      bisherigerVerhandlungsgegenstand !== neuerVerhandlungsgegenstand
-    );
-    const gegenstandHistorie = gegenstandWurdeGeaendert
-      ? [
-          ...vorhandeneGegenstandHistorie,
-          {
-            stand: bisherigerVerhandlungsgegenstand,
-            ersetztAm: Timestamp.now(),
-          },
-        ]
-      : vorhandeneGegenstandHistorie;
 
     const daten = {
       ...verhandlungsFormular,
@@ -1334,12 +1643,48 @@ export default function Verhandlungen({
       geaendertAm: serverTimestamp(),
     };
 
-    if (
-      verhandlungsBearbeitungsId &&
-      (gegenstandWurdeGeaendert ||
-        Array.isArray(bisherigerEintrag?.verhandlungsgegenstandHistorie))
-    ) {
-      daten.verhandlungsgegenstandHistorie = gegenstandHistorie;
+    const neuePhaseDaten = verhandlungsPhaseDaten(daten);
+
+    if (verhandlungsBearbeitungsId && bisherigerEintrag) {
+      const vorhandenePhasen = gespeicherteVerhandlungsphasen(bisherigerEintrag);
+      const aktuellerStand = verhandlungsPhaseDaten(bisherigerEintrag);
+      const wurdeGeaendert = !phasenDatenSindGleich(aktuellerStand, neuePhaseDaten);
+
+      if (wurdeGeaendert) {
+        const phasenMitAusgangsstand = vorhandenePhasen.length > 0
+          ? vorhandenePhasen
+          : [
+              {
+                nummer: 1,
+                gespeichertAm:
+                  bisherigerEintrag.erstelltAm ||
+                  bisherigerEintrag.geaendertAm ||
+                  Timestamp.now(),
+                daten: aktuellerStand,
+              },
+            ];
+        const naechsteNummer =
+          Math.max(...phasenMitAusgangsstand.map((phase) => phase.nummer), 0) + 1;
+
+        daten.verhandlungsphasen = [
+          ...phasenMitAusgangsstand,
+          {
+            nummer: naechsteNummer,
+            gespeichertAm: Timestamp.now(),
+            daten: neuePhaseDaten,
+          },
+        ];
+        daten.aktuelleVerhandlungsphase = naechsteNummer;
+      }
+    } else {
+      daten.verhandlungsphasen = [
+        {
+          nummer: 1,
+          gespeichertAm: Timestamp.now(),
+          daten: neuePhaseDaten,
+        },
+      ];
+      daten.aktuelleVerhandlungsphase = 1;
     }
 
     if (istBeendet) {
@@ -1373,6 +1718,7 @@ export default function Verhandlungen({
       setVerhandlungsDialogOffen(false);
       setVerhandlungsFormular(leerVerhandlungsFormular);
       setVerhandlungsBearbeitungsId(null);
+      setVerhandlungsBasisPhase(null);
 
       if (daten.angeliefert) {
         setStatusFilter("Alle");
@@ -2450,6 +2796,7 @@ export default function Verhandlungen({
                       >
                         <Typography variant="caption" color="text.secondary" noWrap>
                           Für {eintrag.auftraggeberName || "keine Firma zugeordnet"}
+                          {" · "}{phaseBezeichnung(aktuelleVerhandlungsphaseNummer(eintrag))}
                         </Typography>
                         <Typography
                           variant="body2"
@@ -2532,7 +2879,7 @@ export default function Verhandlungen({
                       </Typography>
                     </Paper>
 
-                    <VerhandlungsgegenstandHistorie eintrag={eintrag} />
+                    <VerhandlungsphasenHistorie eintrag={eintrag} onPhaseBearbeiten={(phase) => verhandlungBearbeitenOeffnen(eintrag, phase)} />
 
                     {eintrag.notizen && (
                       <Paper variant="outlined" sx={{ p: 1.5, mt: 1.5 }}>
@@ -2745,6 +3092,9 @@ export default function Verhandlungen({
                         <Typography variant="caption" color="text.secondary">
                           {eintrag.kategorie}
                         </Typography>
+                        <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
+                          {phaseBezeichnung(aktuelleVerhandlungsphaseNummer(eintrag))}
+                        </Typography>
                       </TableCell>
                       <TableCell sx={{ overflowWrap: "anywhere" }}>
                         <Typography
@@ -2756,7 +3106,16 @@ export default function Verhandlungen({
                         >
                           {eintrag.verhandlungsgegenstand || "—"}
                         </Typography>
-                        <VerhandlungsgegenstandHistorie eintrag={eintrag} compact />
+                        {(gespeicherteVerhandlungsphasen(eintrag).length > 1 || verhandlungsgegenstandHistorie(eintrag).length > 0) && (
+                          <Button
+                            size="small"
+                            variant="text"
+                            sx={{ mt: 0.5, px: 0, minWidth: 0 }}
+                            onClick={() => verhandlungBearbeitenOeffnen(eintrag)}
+                          >
+                            Verhandlungsphasen ansehen
+                          </Button>
+                        )}
                         {eintrag.notizen && (
                           <Box sx={{ mt: 0.75, pt: 0.75, borderTop: 1, borderColor: 'divider' }}>
                             <Typography variant="caption" color="text.secondary" fontWeight={700}>
@@ -2916,9 +3275,10 @@ export default function Verhandlungen({
                             <Typography sx={{ mt: 0.75 }} fontWeight={700}>
                               {eintrag.verhandlungsgegenstand || "Kein Verhandlungsgegenstand"}
                             </Typography>
-                            <VerhandlungsgegenstandHistorie eintrag={eintrag} compact />
+                            <VerhandlungsphasenHistorie eintrag={eintrag} compact onPhaseBearbeiten={(phase) => verhandlungBearbeitenOeffnen(eintrag, phase)} />
                             <Typography variant="body2" color="text.secondary" sx={{ mt: 0.75 }}>
                               Für {eintrag.auftraggeberName || "keine Firma zugeordnet"}
+                              {" · "}{phaseBezeichnung(aktuelleVerhandlungsphaseNummer(eintrag))}
                               {" · "}Liefertermin: {lieferterminAnzeige(eintrag)}
                               {" · "}Einsparung: {euroFormat(einsparung(eintrag))}
                             </Typography>
@@ -3291,11 +3651,33 @@ export default function Verhandlungen({
       >
         <DialogTitle>
           {verhandlungsBearbeitungsId
-            ? "Verhandlung bearbeiten"
+            ? `Verhandlung bearbeiten${verhandlungsBasisPhase ? ` – Basis: ${phaseBezeichnung(verhandlungsBasisPhase)}` : ""}`
             : "Neue Verhandlung anlegen"}
         </DialogTitle>
         <DialogContent sx={{ pt: 2.5 }}>
           <Grid container spacing={2}>
+            {verhandlungsBearbeitungsId && (() => {
+              const eintrag = verhandlungen.find(
+                (item) => item.id === verhandlungsBearbeitungsId
+              );
+              if (!eintrag) return null;
+              const aktuelleNummer = aktuelleVerhandlungsphaseNummer(eintrag);
+              return (
+                <Grid size={{ xs: 12 }}>
+                  <Alert severity={verhandlungsBasisPhase ? "warning" : "info"} sx={{ mb: 1.25 }}>
+                    {verhandlungsBasisPhase
+                      ? `${phaseBezeichnung(verhandlungsBasisPhase)} wurde als Bearbeitungsbasis geladen. Beim Speichern wird die Historie nicht überschrieben, sondern bei einer Änderung eine neue ${phaseBezeichnung(aktuelleNummer + 1)} angelegt.`
+                      : `Aktueller Stand: ${phaseBezeichnung(aktuelleNummer)}. Sobald sich eines der Verhandlungsfelder ändert, wird der komplette neue Stand automatisch als ${phaseBezeichnung(aktuelleNummer + 1)} gespeichert.`}
+                  </Alert>
+                  <VerhandlungsphasenHistorie
+                    eintrag={eintrag}
+                    onPhaseBearbeiten={(phase) =>
+                      verhandlungBearbeitenOeffnen(eintrag, phase)
+                    }
+                  />
+                </Grid>
+              );
+            })()}
             <Grid size={{ xs: 12, md: 6 }}>
               <TextField select required fullWidth label="Firma, für die verhandelt wird" name="auftraggeberId" value={verhandlungsFormular.auftraggeberId} onChange={verhandlungsFeldAendern} helperText={eigeneFirmen.length ? "Auftraggeber auswählen" : "Bitte zuerst über ‚Firmen verwalten‘ eine Firma anlegen"}>
                 <MenuItem value="">Bitte auswählen</MenuItem>
@@ -3350,17 +3732,10 @@ export default function Verhandlungen({
                 placeholder="z. B. Jahreskonditionen, Fahrzeugkauf, Mietpreis oder Materialrabatt"
                 helperText={
                   verhandlungsBearbeitungsId
-                    ? "Änderungen ersetzen den aktuellen Stand. Der bisherige Stand wird automatisch in der Historie gespeichert."
+                    ? "Wie bei allen Feldern erzeugt eine tatsächliche Änderung beim Speichern automatisch eine neue Verhandlungsphase."
                     : "Beschreibe kurz, worüber mit diesem Lieferanten verhandelt wird."
                 }
               />
-              {verhandlungsBearbeitungsId && (
-                <VerhandlungsgegenstandHistorie
-                  eintrag={verhandlungen.find(
-                    (eintrag) => eintrag.id === verhandlungsBearbeitungsId
-                  )}
-                />
-              )}
             </Grid>
             <Grid size={{ xs: 12, md: 6 }}>
               <TextField
