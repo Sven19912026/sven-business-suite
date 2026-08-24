@@ -922,6 +922,12 @@ function vereinbarungenEinsparungWert(eintrag) {
 function einsparung(eintrag) {
   return nachlassEinsparung(eintrag) + vereinbarungenEinsparungWert(eintrag);
 }
+
+function einsparungProzent(eintrag) {
+  const gesamtvolumen = euroWert(eintrag.ausgangsangebot);
+  if (gesamtvolumen <= 0) return 0;
+  return (einsparung(eintrag) / gesamtvolumen) * 100;
+}
 function statusNormalisieren(status) {
   if (status === "Gewonnen" || status === "Verloren") {
     return "Abgeschlossen";
@@ -3388,6 +3394,11 @@ export default function Verhandlungen({
                       <TableCell align="right">
                         <Typography fontWeight={900} color="success.main">
                           {euroFormat(einsparung(eintrag))}
+                        </Typography>
+                        <Typography variant="body2" fontWeight={800} color="success.main" sx={{ display: "block" }}>
+                          {euroWert(eintrag.ausgangsangebot) > 0
+                            ? prozentFormat(einsparungProzent(eintrag))
+                            : "—"}
                         </Typography>
                         <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
                           Nachlass: {euroFormat(nachlassEinsparung(eintrag))}
