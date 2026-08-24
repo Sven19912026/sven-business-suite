@@ -556,11 +556,21 @@ function VerhandlungsphaseDetails({ phase, compact = false }) {
         </Grid>
         <Grid size={{ xs: 12, sm: 6 }}>
           <Typography variant="caption" color="text.secondary">Nachlass inkl. Skonto</Typography>
-          <Typography fontWeight={800}>{euroFormat(nachlassEinsparung(daten))}</Typography>
+          <Typography fontWeight={800}>
+            {euroFormat(nachlassEinsparung(daten))}
+            {euroWert(daten.ausgangsangebot) > 0
+              ? ` · ${prozentFormat(nachlassEinsparungProzent(daten))}`
+              : ""}
+          </Typography>
         </Grid>
         <Grid size={{ xs: 12, sm: 6 }}>
           <Typography variant="caption" color="text.secondary">Gesamtersparnis</Typography>
-          <Typography fontWeight={900} color="success.main">{euroFormat(einsparung(daten))}</Typography>
+          <Typography fontWeight={900} color="success.main">
+            {euroFormat(einsparung(daten))}
+            {euroWert(daten.ausgangsangebot) > 0
+              ? ` · ${prozentFormat(einsparungProzent(daten))}`
+              : ""}
+          </Typography>
         </Grid>
         {daten.notizen && (
           <Grid size={{ xs: 12 }}>
@@ -913,6 +923,12 @@ function nachlassEinsparung(eintrag) {
     euroWert(eintrag.ausgangsangebot) - betragNachSkonto(eintrag),
     0
   );
+}
+
+function nachlassEinsparungProzent(eintrag) {
+  const ausgang = euroWert(eintrag.ausgangsangebot);
+  if (ausgang <= 0) return 0;
+  return (nachlassEinsparung(eintrag) / ausgang) * 100;
 }
 
 function vereinbarungenEinsparungWert(eintrag) {
@@ -2997,9 +3013,12 @@ export default function Verhandlungen({
                           variant="body2"
                           color="success.main"
                           fontWeight={800}
-                          sx={{ flexShrink: 0 }}
+                          sx={{ flexShrink: 0, textAlign: "right" }}
                         >
                           {euroFormat(einsparung(eintrag))}
+                          {euroWert(eintrag.ausgangsangebot) > 0
+                            ? ` · ${prozentFormat(einsparungProzent(eintrag))}`
+                            : ""}
                         </Typography>
                       </Stack>
                       </Box>
@@ -3160,6 +3179,9 @@ export default function Verhandlungen({
                         </Typography>
                         <Typography fontWeight={800}>
                           {euroFormat(nachlassEinsparung(eintrag))}
+                          {euroWert(eintrag.ausgangsangebot) > 0
+                            ? ` · ${prozentFormat(nachlassEinsparungProzent(eintrag))}`
+                            : ""}
                         </Typography>
                       </Grid>
                       <Grid size={{ xs: 6 }}>
@@ -3176,6 +3198,9 @@ export default function Verhandlungen({
                         </Typography>
                         <Typography fontWeight={900} color="success.main">
                           {euroFormat(einsparung(eintrag))}
+                          {euroWert(eintrag.ausgangsangebot) > 0
+                            ? ` · ${prozentFormat(einsparungProzent(eintrag))}`
+                            : ""}
                         </Typography>
                       </Grid>
                       <Grid size={{ xs: 12, sm: 6 }}>
@@ -3530,7 +3555,14 @@ export default function Verhandlungen({
                               Für {eintrag.auftraggeberName || "keine Firma zugeordnet"}
                               {" · "}{phaseBezeichnung(aktuelleVerhandlungsphaseNummer(eintrag))}
                               {" · "}Liefertermin: {lieferterminAnzeige(eintrag)}
+                              {" · "}Nachlass inkl. Skonto: {euroFormat(nachlassEinsparung(eintrag))}
+                              {euroWert(eintrag.ausgangsangebot) > 0
+                                ? ` (${prozentFormat(nachlassEinsparungProzent(eintrag))})`
+                                : ""}
                               {" · "}Gesamtersparnis: {euroFormat(einsparung(eintrag))}
+                              {euroWert(eintrag.ausgangsangebot) > 0
+                                ? ` (${prozentFormat(einsparungProzent(eintrag))})`
+                                : ""}
                             </Typography>
                           </Box>
                           <Stack direction="row" spacing={0.5} justifyContent="flex-end">
@@ -4158,7 +4190,14 @@ export default function Verhandlungen({
                   </Grid>
                   <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
                     <Typography variant="caption" color="text.secondary" fontWeight={800}>NACHLASS INKL. SKONTO</Typography>
-                    <Typography fontWeight={850}>{euroFormat(nachlassEinsparung(verhandlungsFormular))}</Typography>
+                    <Typography fontWeight={850}>
+                      {euroFormat(nachlassEinsparung(verhandlungsFormular))}
+                    </Typography>
+                    <Typography variant="body2" fontWeight={800} color="primary.main">
+                      {euroWert(verhandlungsFormular.ausgangsangebot) > 0
+                        ? prozentFormat(nachlassEinsparungProzent(verhandlungsFormular))
+                        : "—"}
+                    </Typography>
                   </Grid>
                   <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
                     <Typography variant="caption" color="text.secondary" fontWeight={800}>VEREINBARUNGEN / ZUGABEN</Typography>
@@ -4168,9 +4207,16 @@ export default function Verhandlungen({
                     <Divider sx={{ my: 0.5 }} />
                     <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={2}>
                       <Typography fontWeight={900}>GESAMTERSPARNIS</Typography>
-                      <Typography variant="h6" fontWeight={950} color="success.main">
-                        {euroFormat(einsparung(verhandlungsFormular))}
-                      </Typography>
+                      <Box sx={{ textAlign: "right" }}>
+                        <Typography variant="h6" fontWeight={950} color="success.main">
+                          {euroFormat(einsparung(verhandlungsFormular))}
+                        </Typography>
+                        <Typography variant="body2" fontWeight={850} color="success.main">
+                          {euroWert(verhandlungsFormular.ausgangsangebot) > 0
+                            ? prozentFormat(einsparungProzent(verhandlungsFormular))
+                            : "—"}
+                        </Typography>
+                      </Box>
                     </Stack>
                   </Grid>
                 </Grid>
