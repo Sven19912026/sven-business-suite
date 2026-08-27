@@ -72,6 +72,8 @@ const LEERE_AUFGABE = {
   wiederholung: 'Keine',
   erledigt: false,
   bereich: '',
+  offeneRueckmeldung: false,
+  rahmenfarbe: '',
   unteraufgaben: [],
 }
 
@@ -619,7 +621,7 @@ export default function Aufgaben() {
   }
 
   function dragStarten(event, aufgabe) {
-    if (!manuelleSortierung || sortierungSpeichert) return
+    if (sortierungSpeichert) return
     event.dataTransfer.effectAllowed = 'move'
     event.dataTransfer.setData('text/plain', aufgabe.id)
     setGezogeneAufgabeId(aufgabe.id)
@@ -632,6 +634,7 @@ export default function Aufgaben() {
       !quelle
       || (quelle.prioritaet || 'Mittel') !== (zielAufgabe.prioritaet || 'Mittel')
       || (quelle.faelligAm || '') !== (zielAufgabe.faelligAm || '')
+      || (quelle.offeneRueckmeldung === true) !== (zielAufgabe.offeneRueckmeldung === true)
     ) return
     event.preventDefault()
     event.dataTransfer.dropEffect = 'move'
@@ -645,6 +648,10 @@ export default function Aufgaben() {
 
   async function aufgabeAblegen(event, zielAufgabe) {
     event.preventDefault()
+    if (!manuelleSortierung || sortierungSpeichert) {
+      dragBeenden()
+      return
+    }
     const quellId = event.dataTransfer.getData('text/plain') || gezogeneAufgabeId
     const quellAufgabe = aufgaben.find((aufgabe) => aufgabe.id === quellId)
     if (!quellAufgabe || quellAufgabe.id === zielAufgabe.id) {
@@ -656,8 +663,9 @@ export default function Aufgaben() {
     if (
       prioritaet !== (zielAufgabe.prioritaet || 'Mittel')
       || (quellAufgabe.faelligAm || '') !== (zielAufgabe.faelligAm || '')
+      || (quellAufgabe.offeneRueckmeldung === true) !== (zielAufgabe.offeneRueckmeldung === true)
     ) {
-      setFehler('Aufgaben können nur innerhalb derselben Priorität und desselben Fälligkeitstags verschoben werden.')
+      setFehler('Aufgaben können nur innerhalb derselben Priorität, desselben Fälligkeitstags und derselben Tageskategorie sortiert werden.')
       dragBeenden()
       return
     }
@@ -670,6 +678,7 @@ export default function Aufgaben() {
 
     const sichtbareIds = sichtbareGruppe.aufgaben
       .filter((aufgabe) => (aufgabe.faelligAm || '') === (quellAufgabe.faelligAm || ''))
+      .filter((aufgabe) => (aufgabe.offeneRueckmeldung === true) === (quellAufgabe.offeneRueckmeldung === true))
       .map((aufgabe) => aufgabe.id)
     const quellIndex = sichtbareIds.indexOf(quellAufgabe.id)
     const zielIndex = sichtbareIds.indexOf(zielAufgabe.id)
@@ -685,6 +694,7 @@ export default function Aufgaben() {
     const vollstaendigeGruppe = [...bereichAufgaben]
       .filter((aufgabe) => (aufgabe.prioritaet || 'Mittel') === prioritaet)
       .filter((aufgabe) => (aufgabe.faelligAm || '') === (quellAufgabe.faelligAm || ''))
+      .filter((aufgabe) => (aufgabe.offeneRueckmeldung === true) === (quellAufgabe.offeneRueckmeldung === true))
       .sort((a, b) => {
         const aWert = Number.isFinite(Number(a.manuelleReihenfolge)) ? Number(a.manuelleReihenfolge) : Number.MAX_SAFE_INTEGER
         const bWert = Number.isFinite(Number(b.manuelleReihenfolge)) ? Number(b.manuelleReihenfolge) : Number.MAX_SAFE_INTEGER
@@ -715,6 +725,53 @@ export default function Aufgaben() {
     } catch (error) {
       console.error(error)
       setFehler('Die individuelle Reihenfolge konnte nicht gespeichert werden.')
+    } finally {
+      setSortierungSpeichert(false)
+      dragBeenden()
+    }
+  }
+
+  async function aufgabeTagesKategorieAendern(event, zielDatum, zielIstUeberfaellig, offeneRueckmeldung) {
+    event.preventDefault()
+    event.stopPropagation()
+
+    const quellId = event.dataTransfer.getData('text/plain') || gezogeneAufgabeId
+    const quellAufgabe = aufgaben.find((aufgabe) => aufgabe.id === quellId)
+    if (!quellAufgabe) {
+      dragBeenden()
+      return
+    }
+
+    const istQuelleUeberfaellig = Boolean(
+      !quellAufgabe.erledigt
+      && quellAufgabe.faelligAm
+      && quellAufgabe.faelligAm < heute,
+    )
+    const gleicherTag = zielIstUeberfaellig
+      ? istQuelleUeberfaellig
+      : (quellAufgabe.faelligAm || '') === (zielDatum || '')
+
+    if (!gleicherTag) {
+      setFehler('Die Tageskategorie kann nur innerhalb desselben Fälligkeitstags geändert werden.')
+      dragBeenden()
+      return
+    }
+
+    if ((quellAufgabe.offeneRueckmeldung === true) === offeneRueckmeldung) {
+      dragBeenden()
+      return
+    }
+
+    setSortierungSpeichert(true)
+    setFehler('')
+    try {
+      await updateDoc(doc(db, 'suiteAufgaben', quellAufgabe.id), {
+        offeneRueckmeldung,
+        aktualisiertAm: serverTimestamp(),
+      })
+    } catch (error) {
+      console.error(error)
+      setFehler('Die Aufgabe konnte nicht in die gewünschte Tageskategorie verschoben werden.')
     } finally {
       setSortierungSpeichert(false)
       dragBeenden()
@@ -1004,332 +1061,11 @@ export default function Aufgaben() {
     finally { setSpeichert(false) }
   }
 
-  const anzahlBetroffen = loeschKategorie ? aufgaben.filter((item) => item.kategorieId === loeschKategorie.id).length : 0
-
-  return (
-    <Stack spacing={3}>
-      <Paper sx={{ p: { xs: 2.5, sm: 3 } }}>
-        <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" gap={2}>
-          <Box>
-            <Typography variant="overline" color="primary" fontWeight={800}>Business Suite 5.5.0</Typography>
-            <Typography variant="h4" fontWeight={800}>Aufgaben</Typography>
-            <Typography color="text.secondary" mt={0.5}>Aufgaben für Arbeit und Privat getrennt planen, priorisieren und verwalten.</Typography>
-          </Box>
-          <Stack direction={{ xs: 'column', sm: 'row' }} gap={1}>
-            <Button startIcon={<CategoryIcon />} variant="outlined" onClick={neueKategorie}>Kategorie</Button>
-            <Button startIcon={<AddIcon />} variant="contained" onClick={() => neueAufgabe()} disabled={!kategorien.length}>Neue Aufgabe</Button>
-          </Stack>
-        </Stack>
-      </Paper>
-
-      <Paper sx={{ p: 1.25 }}>
-        <ToggleButtonGroup
-          value={bereich}
-          exclusive
-          onChange={bereichWechseln}
-          fullWidth
-          color="primary"
-          aria-label="Aufgabenbereich auswählen"
-          sx={{
-            '& .MuiToggleButton-root': {
-              py: 1.25,
-              gap: 1,
-              fontWeight: 850,
-              textTransform: 'none',
-              fontSize: { xs: '0.95rem', sm: '1rem' },
-            },
-          }}
-        >
-          <ToggleButton value="arbeit" aria-label="Arbeitsaufgaben anzeigen">
-            <WorkIcon />
-            Arbeit
-          </ToggleButton>
-          <ToggleButton value="privat" aria-label="Private Aufgaben anzeigen">
-            <HomeOutlinedIcon />
-            Privat
-          </ToggleButton>
-        </ToggleButtonGroup>
-      </Paper>
-
-      {fehler && <Alert severity="error" onClose={() => setFehler('')}>{fehler}</Alert>}
-
-      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr 1fr', md: 'repeat(4, 1fr)' }, gap: 2 }}>
-        <Kennzahl icon={<AssignmentIcon color="primary" />} label="Offen" wert={kennzahlen.offen} />
-        <Kennzahl icon={<TodayIcon color="warning" />} label="Heute fällig" wert={kennzahlen.heute} />
-        <Kennzahl icon={<WarningAmberIcon color="error" />} label="Überfällig" wert={kennzahlen.ueberfaellig} />
-        <Kennzahl icon={<TaskAltIcon color="success" />} label="Erledigt" wert={kennzahlen.erledigt} />
-      </Box>
-
-      <Paper variant="outlined" sx={{ overflow: 'hidden' }}>
-        <Stack
-          direction={{ xs: 'column', sm: 'row' }}
-          alignItems={{ xs: 'stretch', sm: 'center' }}
-          gap={1}
-          sx={{ p: { xs: 1.25, sm: 1.5 }, bgcolor: tagesablaufOffen ? 'action.hover' : 'background.paper' }}
-        >
-          <Stack
-            direction="row"
-            alignItems="flex-start"
-            gap={0.75}
-            onClick={() => setTagesablaufOffen((offen) => !offen)}
-            sx={{ flexGrow: 1, minWidth: 0, cursor: 'pointer' }}
-          >
-            <IconButton
-              size="small"
-              tabIndex={-1}
-              aria-label={tagesablaufOffen ? 'Tagesablauf einklappen' : 'Tagesablauf ausklappen'}
-              sx={{ flexShrink: 0 }}
-            >
-              {tagesablaufOffen ? <ExpandLessIcon /> : <ExpandMoreIcon />}
-            </IconButton>
-            <Box sx={{ minWidth: 0, flexGrow: 1 }}>
-              <Stack direction="row" gap={0.75} alignItems="center" flexWrap="wrap" useFlexGap>
-                <Typography fontWeight={850}>Tagesablauf</Typography>
-                {tagesablaufDatum === heute && <Chip size="small" color="warning" label="Heute" />}
-                {tagesablaufHatAenderungen && <Chip size="small" color="warning" variant="outlined" label="Ungespeichert" />}
-              </Stack>
-              <Typography variant="body2" color="text.secondary" sx={{ textTransform: 'capitalize' }}>
-                {datumsGruppeFormatieren(tagesablaufDatum)} · {bereichName}
-              </Typography>
-              {!tagesablaufOffen && tagesablaufInhalt && (
-                <RichTextContent
-                  value={tagesablaufInhalt}
-                  sx={{ mt: 0.6, fontSize: '0.875rem', maxHeight: '2.9em', overflow: 'hidden' }}
-                />
-              )}
-              {!tagesablaufOffen && !tagesablaufInhalt && tagesablaufGeladen && (
-                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
-                  Noch kein Tagesablauf eingetragen.
-                </Typography>
-              )}
-            </Box>
-          </Stack>
-          <TextField
-            size="small"
-            label="Tag"
-            type="date"
-            value={tagesablaufDatum}
-            onChange={tagesablaufDatumWechseln}
-            InputLabelProps={{ shrink: true }}
-            sx={{ width: { xs: '100%', sm: 180 }, flexShrink: 0 }}
-          />
-        </Stack>
-
-        <Collapse in={tagesablaufOffen} timeout="auto" unmountOnExit>
-          <Divider />
-          <Box sx={{ p: { xs: 1.25, sm: 1.75 } }}>
-            {!tagesablaufGeladen ? (
-              <Typography color="text.secondary">Tagesablauf wird geladen …</Typography>
-            ) : (
-              <Stack spacing={1.25}>
-                <RichTextEditor
-                  label={`Notiz für ${datumFormatieren(tagesablaufDatum)}`}
-                  value={tagesablaufEntwurf}
-                  onChange={setTagesablaufEntwurf}
-                  minHeight={180}
-                />
-                <Stack
-                  direction={{ xs: 'column', sm: 'row' }}
-                  justifyContent="space-between"
-                  alignItems={{ sm: 'center' }}
-                  gap={1}
-                >
-                  <Typography variant="caption" color="text.secondary">
-                    Beliebig lange Tagesnotiz mit Fett, Kursiv, Unterstrichen, Schriftfarbe und Zeilenumbrüchen.
-                  </Typography>
-                  <Button
-                    variant="contained"
-                    onClick={tagesablaufSpeichern}
-                    disabled={tagesablaufSpeichert || !tagesablaufHatAenderungen}
-                    sx={{ minWidth: 120, flexShrink: 0 }}
-                  >
-                    {tagesablaufSpeichert ? 'Speichert …' : 'Speichern'}
-                  </Button>
-                </Stack>
-              </Stack>
-            )}
-          </Box>
-        </Collapse>
-      </Paper>
-
-      <Paper sx={{ p: 2 }}>
-        <Stack direction={{ xs: 'column', lg: 'row' }} spacing={2} alignItems={{ lg: 'center' }}>
-          <TextField label="Suche" value={suche} onChange={(e) => setSuche(e.target.value)} fullWidth />
-          <TextField select label="Kategorie" value={filterKategorie} onChange={(e) => setFilterKategorie(e.target.value)} sx={{ minWidth: 210 }}>
-            <MenuItem value="Alle">Alle Kategorien</MenuItem>
-            {sortierteKategorien.map((item) => <MenuItem key={item.id} value={item.id}>{item.name}</MenuItem>)}
-          </TextField>
-          <TextField select label="Status" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} sx={{ minWidth: 150 }}>
-            {['Offen', 'Erledigt', 'Alle'].map((wert) => <MenuItem key={wert} value={wert}>{wert}</MenuItem>)}
-          </TextField>
-          <TextField
-            select
-            label="Sortierung"
-            value={sortierung}
-            onChange={(e) => setSortierung(e.target.value)}
-            disabled={manuelleSortierung}
-            sx={{ minWidth: 170 }}
-          >
-            {['Fälligkeit', 'Titel'].map((wert) => <MenuItem key={wert} value={wert}>{wert}</MenuItem>)}
-          </TextField>
-          <FormControlLabel
-            sx={{ minWidth: 230, ml: { lg: 0.5 } }}
-            control={(
-              <Switch
-                checked={manuelleSortierung}
-                onChange={manuelleSortierungUmschalten}
-                disabled={sortierungSpeichert}
-              />
-            )}
-            label={sortierungSpeichert ? 'Reihenfolge wird gespeichert …' : 'Individuell sortieren'}
-          />
-        </Stack>
-      </Paper>
-
-      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'minmax(0, 1fr)', lg: 'minmax(0, 2fr) minmax(280px, 1fr)' }, gap: 3, minWidth: 0 }}>
-        <Stack spacing={1.5} sx={{ minWidth: 0 }}>
-          <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ sm: 'center' }} gap={1}>
-            <Box>
-              <Typography variant="h6" fontWeight={800}>Aufgaben nach Priorität</Typography>
-              <Typography variant="body2" color="text.secondary">
-                Prioritätsgruppen und Fälligkeitstage anklicken, um sie ein- oder auszuklappen. Überfällige Aufgaben sind je Priorität in einer gemeinsamen Gruppe zusammengefasst.
-              </Typography>
-            </Box>
-            {prioritaetsGruppen.length > 1 && (
-              <Stack direction="row" gap={0.5}>
-                <Button size="small" onClick={() => allePrioritaetenSetzen(true)}>Alle öffnen</Button>
-                <Button size="small" onClick={() => allePrioritaetenSetzen(false)}>Alle schließen</Button>
-              </Stack>
-            )}
-          </Stack>
-
-          {manuelleSortierung && (
-            <Alert severity="info">
-              Ziehe Aufgaben am Griff in die gewünschte Reihenfolge. Verschieben ist nur innerhalb derselben Priorität und desselben Fälligkeitstags möglich.
-            </Alert>
-          )}
-
-          {!gefilterteAufgaben.length && <Paper sx={{ p: 5, textAlign: 'center' }}><TaskAltIcon color="disabled" sx={{ fontSize: 52 }} /><Typography variant="h6" fontWeight={700} mt={1}>Keine Aufgaben in „{bereichName}“ gefunden</Typography></Paper>}
-
-          {prioritaetsGruppen.map((gruppe) => {
-            const istOffen = offenePrioritaeten[gruppe.id] !== false
-            return (
-              <Paper key={gruppe.id} variant="outlined" sx={{ overflow: 'hidden' }}>
-                <Stack
-                  direction="row"
-                  alignItems="center"
-                  gap={1}
-                  role="button"
-                  tabIndex={0}
-                  aria-expanded={istOffen}
-                  onClick={() => prioritaetUmschalten(gruppe.id)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' || event.key === ' ') {
-                      event.preventDefault()
-                      prioritaetUmschalten(gruppe.id)
-                    }
-                  }}
-                  sx={{
-                    p: 1.5,
-                    cursor: 'pointer',
-                    bgcolor: 'action.hover',
-                    '&:hover': { bgcolor: 'action.selected' },
-                  }}
-                >
-                  <IconButton size="small" tabIndex={-1} aria-label={istOffen ? 'Prioritätsgruppe schließen' : 'Prioritätsgruppe öffnen'}>
-                    {istOffen ? <ExpandLessIcon /> : <ExpandMoreIcon />}
-                  </IconButton>
-                  <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-                    <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
-                      <Typography fontWeight={850}>{gruppe.name}</Typography>
-                      <Chip size="small" color={prioritaetsFarbe(gruppe.prioritaet)} label={gruppe.prioritaet} />
-                    </Stack>
-                    <Typography variant="body2" color="text.secondary">
-                      {gruppe.aufgaben.length} Aufgabe{gruppe.aufgaben.length === 1 ? '' : 'n'} im aktuellen Filter
-                    </Typography>
-                  </Box>
-                  <Chip size="small" label={gruppe.aufgaben.length} color={istOffen ? 'primary' : 'default'} />
-                  <Tooltip title={`Neue Aufgabe mit Priorität „${gruppe.prioritaet}“`}>
-                    <IconButton
-                      size="small"
-                      color="primary"
-                      onClick={(event) => {
-                        event.stopPropagation()
-                        neueAufgabe('', gruppe.prioritaet)
-                      }}
-                    >
-                      <AddIcon fontSize="small" />
-                    </IconButton>
-                  </Tooltip>
-                </Stack>
-
-                <Collapse in={istOffen} timeout="auto" unmountOnExit>
-                  <Stack spacing={1.25} sx={{ p: 1.5, pt: 1.25 }}>
-                    {gruppe.datumsGruppen.map((datumsGruppe) => {
-                      const hatGespeichertenStand = Object.prototype.hasOwnProperty.call(offeneDatumsGruppen, datumsGruppe.id)
-                      const standardOffen = !datumsGruppe.istUeberfaelligGruppe
-                      const datumsGruppeIstOffen = hatGespeichertenStand
-                        ? offeneDatumsGruppen[datumsGruppe.id] !== false
-                        : standardOffen
-                      const gruppeIstHeute = !datumsGruppe.istUeberfaelligGruppe && datumsGruppe.datum === heute
-                      const gruppeIstUeberfaellig = datumsGruppe.istUeberfaelligGruppe === true
-
-                      return (
-                        <Paper key={datumsGruppe.id} variant="outlined" sx={{ overflow: 'hidden', minWidth: 0 }}>
-                          <Stack
-                            direction="row"
-                            alignItems="flex-start"
-                            gap={0.75}
-                            role="button"
-                            tabIndex={0}
-                            aria-expanded={datumsGruppeIstOffen}
-                            onClick={() => datumsGruppeUmschalten(datumsGruppe.id, standardOffen)}
-                            onKeyDown={(event) => {
-                              if (event.key === 'Enter' || event.key === ' ') {
-                                event.preventDefault()
-                                datumsGruppeUmschalten(datumsGruppe.id, standardOffen)
-                              }
-                            }}
-                            sx={{
-                              px: { xs: 1, sm: 1.5 },
-                              py: 1.25,
-                              minWidth: 0,
-                              cursor: 'pointer',
-                              bgcolor: gruppeIstUeberfaellig ? 'rgba(211, 47, 47, 0.06)' : (gruppeIstHeute ? 'rgba(237, 108, 2, 0.07)' : 'background.default'),
-                              '&:hover': { bgcolor: 'action.hover' },
-                            }}
-                          >
-                            <IconButton
-                              size="small"
-                              tabIndex={-1}
-                              aria-label={datumsGruppeIstOffen
-                                ? (gruppeIstUeberfaellig ? 'Überfällige Aufgaben schließen' : 'Fälligkeitstag schließen')
-                                : (gruppeIstUeberfaellig ? 'Überfällige Aufgaben öffnen' : 'Fälligkeitstag öffnen')}
-                              sx={{ flexShrink: 0 }}
-                            >
-                              {datumsGruppeIstOffen ? <ExpandLessIcon /> : <ExpandMoreIcon />}
-                            </IconButton>
-                            <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-                              <Typography fontWeight={850} sx={{ textTransform: 'capitalize', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
-                                {gruppeIstUeberfaellig ? 'Überfällig' : datumsGruppeFormatieren(datumsGruppe.datum)}
-                              </Typography>
-                              <Stack direction="row" gap={0.75} alignItems="center" flexWrap="wrap" useFlexGap mt={0.5}>
-                                <Typography variant="body2" color="text.secondary">
-                                  {gruppeIstUeberfaellig
-                                    ? `${datumsGruppe.aufgaben.length} überfällige Aufgabe${datumsGruppe.aufgaben.length === 1 ? '' : 'n'}`
-                                    : `${datumsGruppe.aufgaben.length} Aufgabe${datumsGruppe.aufgaben.length === 1 ? '' : 'n'} an diesem Tag`}
-                                </Typography>
-                                {gruppeIstHeute && <Chip size="small" color="warning" label="Heute" />}
-                                {gruppeIstUeberfaellig && <Chip size="small" color="error" label="Überfällig" />}
-                                <Chip size="small" label={datumsGruppe.aufgaben.length} color={datumsGruppeIstOffen ? 'primary' : 'default'} />
-                              </Stack>
-                            </Box>
-                          </Stack>
-
-                          <Collapse in={datumsGruppeIstOffen} timeout="auto" unmountOnExit>
-                            <Stack spacing={1.25} sx={{ p: { xs: 1, sm: 1.25 }, pt: 1.25 }}>
-                              {datumsGruppe.aufgaben.map((aufgabe) => {
+  function aufgabeKarte(aufgabe) {
                                 const ueberfaellig = !aufgabe.erledigt && aufgabe.faelligAm && aufgabe.faelligAm < heute
+                                const individuelleRahmenfarbe = /^#[0-9a-fA-F]{6}$/.test(String(aufgabe.rahmenfarbe || ''))
+                                  ? aufgabe.rahmenfarbe
+                                  : ''
                                 const wirdGezogen = gezogeneAufgabeId === aufgabe.id
                                 const istDragZiel = dragUeberAufgabeId === aufgabe.id && !wirdGezogen
                                 const kategorie = kategorien.find((eintrag) => eintrag.id === aufgabe.kategorieId)
@@ -1340,7 +1076,7 @@ export default function Aufgaben() {
                                   <Card
                                     key={aufgabe.id}
                                     variant="outlined"
-                                    draggable={manuelleSortierung && !sortierungSpeichert}
+                                    draggable={!sortierungSpeichert}
                                     onDragStart={(event) => dragStarten(event, aufgabe)}
                                     onDragOver={(event) => dragUeber(event, aufgabe)}
                                     onDrop={(event) => aufgabeAblegen(event, aufgabe)}
@@ -1350,8 +1086,10 @@ export default function Aufgaben() {
                                       maxWidth: '100%',
                                       overflow: 'hidden',
                                       opacity: wirdGezogen ? 0.45 : (aufgabe.erledigt ? 0.65 : 1),
-                                      borderColor: istDragZiel ? 'primary.main' : (ueberfaellig ? 'error.main' : 'divider'),
-                                      borderWidth: istDragZiel ? 2 : 1,
+                                      borderColor: istDragZiel
+                                        ? 'primary.main'
+                                        : (individuelleRahmenfarbe || (ueberfaellig ? 'error.main' : 'divider')),
+                                      borderWidth: istDragZiel ? 2 : (individuelleRahmenfarbe ? 2 : 1),
                                       cursor: manuelleSortierung ? 'grab' : 'default',
                                       transition: 'border-color 120ms ease, opacity 120ms ease',
                                       '&:active': manuelleSortierung ? { cursor: 'grabbing' } : undefined,
@@ -1363,9 +1101,7 @@ export default function Aufgaben() {
                                           display: 'grid',
                                           gridTemplateColumns: {
                                             xs: 'auto minmax(0, 1fr)',
-                                            sm: manuelleSortierung
-                                              ? 'auto auto minmax(0, 1fr) auto'
-                                              : 'auto minmax(0, 1fr) auto',
+                                            sm: 'auto auto minmax(0, 1fr) auto',
                                           },
                                           columnGap: { xs: 0.5, sm: 1 },
                                           rowGap: 0.75,
@@ -1373,8 +1109,7 @@ export default function Aufgaben() {
                                           minWidth: 0,
                                         }}
                                       >
-                                        {manuelleSortierung && (
-                                          <Tooltip title="Zum Sortieren ziehen">
+                                        <Tooltip title={manuelleSortierung ? 'Ziehen zum Sortieren oder Verschieben' : 'Ziehen, um die Tageskategorie zu ändern'}>
                                             <Box
                                               aria-label="Aufgabe verschieben"
                                               sx={{
@@ -1389,7 +1124,6 @@ export default function Aufgaben() {
                                               <DragIndicatorIcon />
                                             </Box>
                                           </Tooltip>
-                                        )}
                                         <Checkbox
                                           checked={aufgabe.erledigt === true}
                                           onChange={() => aufgabeStatusAendern(aufgabe)}
@@ -1426,6 +1160,9 @@ export default function Aufgaben() {
                                           <Stack direction="row" gap={0.75} flexWrap="wrap" mt={1.25} useFlexGap sx={{ minWidth: 0, alignItems: 'center' }}>
                                             <Chip size="small" color={prioritaetsFarbe(aufgabe.prioritaet)} label={aufgabe.prioritaet || 'Mittel'} />
                                             <Chip size="small" variant="outlined" label={kategorie?.name || 'Ohne Kategorie'} sx={{ maxWidth: '100%', '& .MuiChip-label': { overflow: 'hidden', textOverflow: 'ellipsis' } }} />
+                                            {aufgabe.offeneRueckmeldung === true && (
+                                              <Chip size="small" color="info" variant="outlined" label="Offene Rückmeldung" />
+                                            )}
                                             {ueberfaellig && <Chip size="small" color="error" label="Überfällig" />}
                                             {unteraufgaben.length > 0 && (
                                               <Chip
@@ -1726,7 +1463,390 @@ export default function Aufgaben() {
                                     </CardContent>
                                   </Card>
                                 )
-                              })}
+  }
+
+  const anzahlBetroffen = loeschKategorie ? aufgaben.filter((item) => item.kategorieId === loeschKategorie.id).length : 0
+
+  return (
+    <Stack spacing={3}>
+      <Paper sx={{ p: { xs: 2.5, sm: 3 } }}>
+        <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" gap={2}>
+          <Box>
+            <Typography variant="overline" color="primary" fontWeight={800}>Business Suite 5.5.0</Typography>
+            <Typography variant="h4" fontWeight={800}>Aufgaben</Typography>
+            <Typography color="text.secondary" mt={0.5}>Aufgaben für Arbeit und Privat getrennt planen, priorisieren und verwalten.</Typography>
+          </Box>
+          <Stack direction={{ xs: 'column', sm: 'row' }} gap={1}>
+            <Button startIcon={<CategoryIcon />} variant="outlined" onClick={neueKategorie}>Kategorie</Button>
+            <Button startIcon={<AddIcon />} variant="contained" onClick={() => neueAufgabe()} disabled={!kategorien.length}>Neue Aufgabe</Button>
+          </Stack>
+        </Stack>
+      </Paper>
+
+      <Paper sx={{ p: 1.25 }}>
+        <ToggleButtonGroup
+          value={bereich}
+          exclusive
+          onChange={bereichWechseln}
+          fullWidth
+          color="primary"
+          aria-label="Aufgabenbereich auswählen"
+          sx={{
+            '& .MuiToggleButton-root': {
+              py: 1.25,
+              gap: 1,
+              fontWeight: 850,
+              textTransform: 'none',
+              fontSize: { xs: '0.95rem', sm: '1rem' },
+            },
+          }}
+        >
+          <ToggleButton value="arbeit" aria-label="Arbeitsaufgaben anzeigen">
+            <WorkIcon />
+            Arbeit
+          </ToggleButton>
+          <ToggleButton value="privat" aria-label="Private Aufgaben anzeigen">
+            <HomeOutlinedIcon />
+            Privat
+          </ToggleButton>
+        </ToggleButtonGroup>
+      </Paper>
+
+      {fehler && <Alert severity="error" onClose={() => setFehler('')}>{fehler}</Alert>}
+
+      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr 1fr', md: 'repeat(4, 1fr)' }, gap: 2 }}>
+        <Kennzahl icon={<AssignmentIcon color="primary" />} label="Offen" wert={kennzahlen.offen} />
+        <Kennzahl icon={<TodayIcon color="warning" />} label="Heute fällig" wert={kennzahlen.heute} />
+        <Kennzahl icon={<WarningAmberIcon color="error" />} label="Überfällig" wert={kennzahlen.ueberfaellig} />
+        <Kennzahl icon={<TaskAltIcon color="success" />} label="Erledigt" wert={kennzahlen.erledigt} />
+      </Box>
+
+      <Paper variant="outlined" sx={{ overflow: 'hidden' }}>
+        <Stack
+          direction={{ xs: 'column', sm: 'row' }}
+          alignItems={{ xs: 'stretch', sm: 'center' }}
+          gap={1}
+          sx={{ p: { xs: 1.25, sm: 1.5 }, bgcolor: tagesablaufOffen ? 'action.hover' : 'background.paper' }}
+        >
+          <Stack
+            direction="row"
+            alignItems="flex-start"
+            gap={0.75}
+            onClick={() => setTagesablaufOffen((offen) => !offen)}
+            sx={{ flexGrow: 1, minWidth: 0, cursor: 'pointer' }}
+          >
+            <IconButton
+              size="small"
+              tabIndex={-1}
+              aria-label={tagesablaufOffen ? 'Tagesablauf einklappen' : 'Tagesablauf ausklappen'}
+              sx={{ flexShrink: 0 }}
+            >
+              {tagesablaufOffen ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+            </IconButton>
+            <Box sx={{ minWidth: 0, flexGrow: 1 }}>
+              <Stack direction="row" gap={0.75} alignItems="center" flexWrap="wrap" useFlexGap>
+                <Typography fontWeight={850}>Tagesablauf</Typography>
+                {tagesablaufDatum === heute && <Chip size="small" color="warning" label="Heute" />}
+                {tagesablaufHatAenderungen && <Chip size="small" color="warning" variant="outlined" label="Ungespeichert" />}
+              </Stack>
+              <Typography variant="body2" color="text.secondary" sx={{ textTransform: 'capitalize' }}>
+                {datumsGruppeFormatieren(tagesablaufDatum)} · {bereichName}
+              </Typography>
+              {!tagesablaufOffen && tagesablaufInhalt && (
+                <RichTextContent
+                  value={tagesablaufInhalt}
+                  sx={{ mt: 0.6, fontSize: '0.875rem', maxHeight: '2.9em', overflow: 'hidden' }}
+                />
+              )}
+              {!tagesablaufOffen && !tagesablaufInhalt && tagesablaufGeladen && (
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+                  Noch kein Tagesablauf eingetragen.
+                </Typography>
+              )}
+            </Box>
+          </Stack>
+          <TextField
+            size="small"
+            label="Tag"
+            type="date"
+            value={tagesablaufDatum}
+            onChange={tagesablaufDatumWechseln}
+            InputLabelProps={{ shrink: true }}
+            sx={{ width: { xs: '100%', sm: 180 }, flexShrink: 0 }}
+          />
+        </Stack>
+
+        <Collapse in={tagesablaufOffen} timeout="auto" unmountOnExit>
+          <Divider />
+          <Box sx={{ p: { xs: 1.25, sm: 1.75 } }}>
+            {!tagesablaufGeladen ? (
+              <Typography color="text.secondary">Tagesablauf wird geladen …</Typography>
+            ) : (
+              <Stack spacing={1.25}>
+                <RichTextEditor
+                  label={`Notiz für ${datumFormatieren(tagesablaufDatum)}`}
+                  value={tagesablaufEntwurf}
+                  onChange={setTagesablaufEntwurf}
+                  minHeight={180}
+                />
+                <Stack
+                  direction={{ xs: 'column', sm: 'row' }}
+                  justifyContent="space-between"
+                  alignItems={{ sm: 'center' }}
+                  gap={1}
+                >
+                  <Typography variant="caption" color="text.secondary">
+                    Beliebig lange Tagesnotiz mit Fett, Kursiv, Unterstrichen, Schriftfarbe und Zeilenumbrüchen.
+                  </Typography>
+                  <Button
+                    variant="contained"
+                    onClick={tagesablaufSpeichern}
+                    disabled={tagesablaufSpeichert || !tagesablaufHatAenderungen}
+                    sx={{ minWidth: 120, flexShrink: 0 }}
+                  >
+                    {tagesablaufSpeichert ? 'Speichert …' : 'Speichern'}
+                  </Button>
+                </Stack>
+              </Stack>
+            )}
+          </Box>
+        </Collapse>
+      </Paper>
+
+      <Paper sx={{ p: 2 }}>
+        <Stack direction={{ xs: 'column', lg: 'row' }} spacing={2} alignItems={{ lg: 'center' }}>
+          <TextField label="Suche" value={suche} onChange={(e) => setSuche(e.target.value)} fullWidth />
+          <TextField select label="Kategorie" value={filterKategorie} onChange={(e) => setFilterKategorie(e.target.value)} sx={{ minWidth: 210 }}>
+            <MenuItem value="Alle">Alle Kategorien</MenuItem>
+            {sortierteKategorien.map((item) => <MenuItem key={item.id} value={item.id}>{item.name}</MenuItem>)}
+          </TextField>
+          <TextField select label="Status" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} sx={{ minWidth: 150 }}>
+            {['Offen', 'Erledigt', 'Alle'].map((wert) => <MenuItem key={wert} value={wert}>{wert}</MenuItem>)}
+          </TextField>
+          <TextField
+            select
+            label="Sortierung"
+            value={sortierung}
+            onChange={(e) => setSortierung(e.target.value)}
+            disabled={manuelleSortierung}
+            sx={{ minWidth: 170 }}
+          >
+            {['Fälligkeit', 'Titel'].map((wert) => <MenuItem key={wert} value={wert}>{wert}</MenuItem>)}
+          </TextField>
+          <FormControlLabel
+            sx={{ minWidth: 230, ml: { lg: 0.5 } }}
+            control={(
+              <Switch
+                checked={manuelleSortierung}
+                onChange={manuelleSortierungUmschalten}
+                disabled={sortierungSpeichert}
+              />
+            )}
+            label={sortierungSpeichert ? 'Reihenfolge wird gespeichert …' : 'Individuell sortieren'}
+          />
+        </Stack>
+      </Paper>
+
+      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'minmax(0, 1fr)', lg: 'minmax(0, 2fr) minmax(280px, 1fr)' }, gap: 3, minWidth: 0 }}>
+        <Stack spacing={1.5} sx={{ minWidth: 0 }}>
+          <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ sm: 'center' }} gap={1}>
+            <Box>
+              <Typography variant="h6" fontWeight={800}>Aufgaben nach Priorität</Typography>
+              <Typography variant="body2" color="text.secondary">
+                Prioritätsgruppen und Fälligkeitstage anklicken, um sie ein- oder auszuklappen. Innerhalb jedes Tages gibt es „Aufgaben“ und „Offene Rückmeldungen“; Aufgaben können per Drag & Drop zwischen beiden Bereichen verschoben werden.
+              </Typography>
+            </Box>
+            {prioritaetsGruppen.length > 1 && (
+              <Stack direction="row" gap={0.5}>
+                <Button size="small" onClick={() => allePrioritaetenSetzen(true)}>Alle öffnen</Button>
+                <Button size="small" onClick={() => allePrioritaetenSetzen(false)}>Alle schließen</Button>
+              </Stack>
+            )}
+          </Stack>
+
+          {manuelleSortierung && (
+            <Alert severity="info">
+              Ziehe Aufgaben am Griff in die gewünschte Reihenfolge. Sortieren ist nur innerhalb derselben Priorität, desselben Fälligkeitstags und derselben Tageskategorie möglich.
+            </Alert>
+          )}
+
+          {!gefilterteAufgaben.length && <Paper sx={{ p: 5, textAlign: 'center' }}><TaskAltIcon color="disabled" sx={{ fontSize: 52 }} /><Typography variant="h6" fontWeight={700} mt={1}>Keine Aufgaben in „{bereichName}“ gefunden</Typography></Paper>}
+
+          {prioritaetsGruppen.map((gruppe) => {
+            const istOffen = offenePrioritaeten[gruppe.id] !== false
+            return (
+              <Paper key={gruppe.id} variant="outlined" sx={{ overflow: 'hidden' }}>
+                <Stack
+                  direction="row"
+                  alignItems="center"
+                  gap={1}
+                  role="button"
+                  tabIndex={0}
+                  aria-expanded={istOffen}
+                  onClick={() => prioritaetUmschalten(gruppe.id)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault()
+                      prioritaetUmschalten(gruppe.id)
+                    }
+                  }}
+                  sx={{
+                    p: 1.5,
+                    cursor: 'pointer',
+                    bgcolor: 'action.hover',
+                    '&:hover': { bgcolor: 'action.selected' },
+                  }}
+                >
+                  <IconButton size="small" tabIndex={-1} aria-label={istOffen ? 'Prioritätsgruppe schließen' : 'Prioritätsgruppe öffnen'}>
+                    {istOffen ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+                  </IconButton>
+                  <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+                    <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+                      <Typography fontWeight={850}>{gruppe.name}</Typography>
+                      <Chip size="small" color={prioritaetsFarbe(gruppe.prioritaet)} label={gruppe.prioritaet} />
+                    </Stack>
+                    <Typography variant="body2" color="text.secondary">
+                      {gruppe.aufgaben.length} Aufgabe{gruppe.aufgaben.length === 1 ? '' : 'n'} im aktuellen Filter
+                    </Typography>
+                  </Box>
+                  <Chip size="small" label={gruppe.aufgaben.length} color={istOffen ? 'primary' : 'default'} />
+                  <Tooltip title={`Neue Aufgabe mit Priorität „${gruppe.prioritaet}“`}>
+                    <IconButton
+                      size="small"
+                      color="primary"
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        neueAufgabe('', gruppe.prioritaet)
+                      }}
+                    >
+                      <AddIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                </Stack>
+
+                <Collapse in={istOffen} timeout="auto" unmountOnExit>
+                  <Stack spacing={1.25} sx={{ p: 1.5, pt: 1.25 }}>
+                    {gruppe.datumsGruppen.map((datumsGruppe) => {
+                      const hatGespeichertenStand = Object.prototype.hasOwnProperty.call(offeneDatumsGruppen, datumsGruppe.id)
+                      const standardOffen = !datumsGruppe.istUeberfaelligGruppe
+                      const datumsGruppeIstOffen = hatGespeichertenStand
+                        ? offeneDatumsGruppen[datumsGruppe.id] !== false
+                        : standardOffen
+                      const gruppeIstHeute = !datumsGruppe.istUeberfaelligGruppe && datumsGruppe.datum === heute
+                      const gruppeIstUeberfaellig = datumsGruppe.istUeberfaelligGruppe === true
+
+                      return (
+                        <Paper key={datumsGruppe.id} variant="outlined" sx={{ overflow: 'hidden', minWidth: 0 }}>
+                          <Stack
+                            direction="row"
+                            alignItems="flex-start"
+                            gap={0.75}
+                            role="button"
+                            tabIndex={0}
+                            aria-expanded={datumsGruppeIstOffen}
+                            onClick={() => datumsGruppeUmschalten(datumsGruppe.id, standardOffen)}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter' || event.key === ' ') {
+                                event.preventDefault()
+                                datumsGruppeUmschalten(datumsGruppe.id, standardOffen)
+                              }
+                            }}
+                            sx={{
+                              px: { xs: 1, sm: 1.5 },
+                              py: 1.25,
+                              minWidth: 0,
+                              cursor: 'pointer',
+                              bgcolor: gruppeIstUeberfaellig ? 'rgba(211, 47, 47, 0.06)' : (gruppeIstHeute ? 'rgba(237, 108, 2, 0.07)' : 'background.default'),
+                              '&:hover': { bgcolor: 'action.hover' },
+                            }}
+                          >
+                            <IconButton
+                              size="small"
+                              tabIndex={-1}
+                              aria-label={datumsGruppeIstOffen
+                                ? (gruppeIstUeberfaellig ? 'Überfällige Aufgaben schließen' : 'Fälligkeitstag schließen')
+                                : (gruppeIstUeberfaellig ? 'Überfällige Aufgaben öffnen' : 'Fälligkeitstag öffnen')}
+                              sx={{ flexShrink: 0 }}
+                            >
+                              {datumsGruppeIstOffen ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+                            </IconButton>
+                            <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+                              <Typography fontWeight={850} sx={{ textTransform: 'capitalize', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
+                                {gruppeIstUeberfaellig ? 'Überfällig' : datumsGruppeFormatieren(datumsGruppe.datum)}
+                              </Typography>
+                              <Stack direction="row" gap={0.75} alignItems="center" flexWrap="wrap" useFlexGap mt={0.5}>
+                                <Typography variant="body2" color="text.secondary">
+                                  {gruppeIstUeberfaellig
+                                    ? `${datumsGruppe.aufgaben.length} überfällige Aufgabe${datumsGruppe.aufgaben.length === 1 ? '' : 'n'}`
+                                    : `${datumsGruppe.aufgaben.length} Aufgabe${datumsGruppe.aufgaben.length === 1 ? '' : 'n'} an diesem Tag`}
+                                </Typography>
+                                {gruppeIstHeute && <Chip size="small" color="warning" label="Heute" />}
+                                {gruppeIstUeberfaellig && <Chip size="small" color="error" label="Überfällig" />}
+                                <Chip size="small" label={datumsGruppe.aufgaben.length} color={datumsGruppeIstOffen ? 'primary' : 'default'} />
+                              </Stack>
+                            </Box>
+                          </Stack>
+
+                          <Collapse in={datumsGruppeIstOffen} timeout="auto" unmountOnExit>
+                            <Stack spacing={1.25} sx={{ p: { xs: 1, sm: 1.25 }, pt: 1.25 }}>
+                              {[
+                                {
+                                  id: 'aufgaben',
+                                  name: 'Aufgaben',
+                                  offeneRueckmeldung: false,
+                                  aufgaben: datumsGruppe.aufgaben.filter((aufgabe) => aufgabe.offeneRueckmeldung !== true),
+                                },
+                                {
+                                  id: 'rueckmeldungen',
+                                  name: 'Offene Rückmeldungen',
+                                  offeneRueckmeldung: true,
+                                  aufgaben: datumsGruppe.aufgaben.filter((aufgabe) => aufgabe.offeneRueckmeldung === true),
+                                },
+                              ].map((tagesKategorie) => (
+                                <Box
+                                  key={`${datumsGruppe.id}-${tagesKategorie.id}`}
+                                  onDragOver={(event) => {
+                                    if (sortierungSpeichert) return
+                                    event.preventDefault()
+                                    event.dataTransfer.dropEffect = 'move'
+                                  }}
+                                  onDrop={(event) => aufgabeTagesKategorieAendern(
+                                    event,
+                                    datumsGruppe.datum,
+                                    datumsGruppe.istUeberfaelligGruppe === true,
+                                    tagesKategorie.offeneRueckmeldung,
+                                  )}
+                                  sx={{
+                                    p: { xs: 0.75, sm: 1 },
+                                    border: '1px dashed',
+                                    borderColor: tagesKategorie.offeneRueckmeldung ? 'info.main' : 'divider',
+                                    borderRadius: 1.5,
+                                    bgcolor: tagesKategorie.offeneRueckmeldung ? 'rgba(2, 136, 209, 0.045)' : 'transparent',
+                                    minWidth: 0,
+                                  }}
+                                >
+                                  <Stack direction="row" alignItems="center" justifyContent="space-between" gap={1} sx={{ mb: 0.75 }}>
+                                    <Typography
+                                      variant="subtitle2"
+                                      fontWeight={850}
+                                      color={tagesKategorie.offeneRueckmeldung ? 'info.main' : 'text.primary'}
+                                    >
+                                      {tagesKategorie.name}
+                                    </Typography>
+                                    <Chip size="small" label={tagesKategorie.aufgaben.length} variant="outlined" />
+                                  </Stack>
+                                  <Stack spacing={1.25}>
+                                    {!tagesKategorie.aufgaben.length && (
+                                      <Typography variant="body2" color="text.secondary" sx={{ py: 0.5 }}>
+                                        {tagesKategorie.offeneRueckmeldung
+                                          ? 'Aufgabe hierher ziehen, wenn eine Rückmeldung aussteht.'
+                                          : 'Aufgabe hierher ziehen, um sie wieder als normale Aufgabe zu führen.'}
+                                      </Typography>
+                                    )}
+                                    {tagesKategorie.aufgaben.map((aufgabe) => aufgabeKarte(aufgabe))}
+                                  </Stack>
+                                </Box>
+                              ))}
                             </Stack>
                           </Collapse>
                         </Paper>
@@ -1769,7 +1889,17 @@ export default function Aufgaben() {
           <Stack spacing={1} sx={{ p: 2, pt: 1.5 }}>
             {!letzteErledigte.length && <Typography color="text.secondary">In diesem Bereich wurden noch keine Aufgaben erledigt.</Typography>}
             {letzteErledigte.map((aufgabe) => (
-              <Paper key={aufgabe.id} variant="outlined" sx={{ p: 1.5 }}>
+              <Paper
+                key={aufgabe.id}
+                variant="outlined"
+                sx={{
+                  p: 1.5,
+                  borderColor: /^#[0-9a-fA-F]{6}$/.test(String(aufgabe.rahmenfarbe || ''))
+                    ? aufgabe.rahmenfarbe
+                    : 'divider',
+                  borderWidth: /^#[0-9a-fA-F]{6}$/.test(String(aufgabe.rahmenfarbe || '')) ? 2 : 1,
+                }}
+              >
                 <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'stretch', sm: 'center' }} gap={1.5}>
                   <Box sx={{ minWidth: 0 }}>
                     <Typography fontWeight={800}>{aufgabe.titel}</Typography>
@@ -1819,6 +1949,45 @@ export default function Aufgaben() {
             <TextField fullWidth label="Fällig am" type="date" InputLabelProps={{ shrink: true }} value={aufgabeForm.faelligAm} onChange={(e) => setAufgabeForm({ ...aufgabeForm, faelligAm: e.target.value })} />
             <TextField select fullWidth label="Wiederholung" value={aufgabeForm.wiederholung} onChange={(e) => setAufgabeForm({ ...aufgabeForm, wiederholung: e.target.value })}>{['Keine', 'Täglich', 'Wöchentlich', 'Monatlich', 'Jährlich'].map((wert) => <MenuItem key={wert} value={wert}>{wert}</MenuItem>)}</TextField>
           </Stack>
+          <FormControlLabel
+            control={(
+              <Checkbox
+                checked={aufgabeForm.offeneRueckmeldung === true}
+                onChange={(event) => setAufgabeForm((vorher) => ({
+                  ...vorher,
+                  offeneRueckmeldung: event.target.checked,
+                }))}
+              />
+            )}
+            label="Offene Rückmeldung"
+          />
+          <Paper variant="outlined" sx={{ p: 1.25 }}>
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.25} alignItems={{ sm: 'center' }}>
+              <Box sx={{ flexGrow: 1 }}>
+                <Typography fontWeight={750}>Rahmenfarbe</Typography>
+                <Typography variant="caption" color="text.secondary">Frei wählbare Umrandung für diese Aufgabe.</Typography>
+              </Box>
+              <Box
+                component="input"
+                type="color"
+                aria-label="Rahmenfarbe auswählen"
+                value={aufgabeForm.rahmenfarbe || '#1976d2'}
+                onChange={(event) => setAufgabeForm((vorher) => ({
+                  ...vorher,
+                  rahmenfarbe: event.target.value,
+                }))}
+                sx={{ width: 58, height: 40, p: 0.25, border: '1px solid', borderColor: 'divider', borderRadius: 1, bgcolor: 'background.paper', cursor: 'pointer' }}
+              />
+              <Button
+                size="small"
+                variant="outlined"
+                disabled={!aufgabeForm.rahmenfarbe}
+                onClick={() => setAufgabeForm((vorher) => ({ ...vorher, rahmenfarbe: '' }))}
+              >
+                Keine Farbe
+              </Button>
+            </Stack>
+          </Paper>
           <TextField select label="Status" value={aufgabeForm.status} onChange={(e) => setAufgabeForm({ ...aufgabeForm, status: e.target.value })}>{['Offen', 'In Bearbeitung', 'Erledigt'].map((wert) => <MenuItem key={wert} value={wert}>{wert}</MenuItem>)}</TextField>
         </Stack></DialogContent>
         <DialogActions><Button onClick={() => setAufgabeDialog(false)}>Abbrechen</Button><Button variant="contained" onClick={aufgabeSpeichern} disabled={speichert || !aufgabeForm.titel.trim() || !aufgabeForm.kategorieId}>Speichern</Button></DialogActions>
