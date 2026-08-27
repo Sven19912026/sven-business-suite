@@ -176,6 +176,7 @@ export default function Aufgaben() {
   const [filterKategorie, setFilterKategorie] = useState('Alle')
   const [filterStatus, setFilterStatus] = useState('Offen')
   const [sortierung, setSortierung] = useState('Fälligkeit')
+  const [heute, setHeute] = useState(() => heuteIso())
   const [bereich, setBereich] = useState(() => {
     const aktuelleUserId = auth.currentUser?.uid
     if (!aktuelleUserId) return 'arbeit'
@@ -213,6 +214,20 @@ export default function Aufgaben() {
       return {}
     }
   })
+  const [offeneRueckmeldungsGruppen, setOffeneRueckmeldungsGruppen] = useState(() => {
+    const aktuelleUserId = auth.currentUser?.uid
+    if (!aktuelleUserId) return {}
+
+    try {
+      const gespeichert = JSON.parse(
+        localStorage.getItem(`sven-suite-aufgaben-rueckmeldungsgruppen-${aktuelleUserId}`) || '{}',
+      )
+      return gespeichert && typeof gespeichert === 'object' ? gespeichert : {}
+    } catch (error) {
+      console.warn('Gespeicherter Rückmeldungsgruppen-Zustand konnte nicht gelesen werden.', error)
+      return {}
+    }
+  })
   const [offenePrioritaeten, setOffenePrioritaeten] = useState(() => {
     const aktuelleUserId = auth.currentUser?.uid
     if (!aktuelleUserId) return {}
@@ -247,6 +262,41 @@ export default function Aufgaben() {
   const [tagesablaufGeladen, setTagesablaufGeladen] = useState(false)
   const [tagesablaufSpeichert, setTagesablaufSpeichert] = useState(false)
   const laufendeKategorieBereinigungen = useRef(new Set())
+  const laufendeRueckmeldungsUebertragungen = useRef(new Set())
+
+  useEffect(() => {
+    let tageswechselTimer = null
+
+    const datumAktualisieren = () => {
+      setHeute(heuteIso())
+    }
+
+    const naechstenTageswechselPlanen = () => {
+      if (tageswechselTimer) window.clearTimeout(tageswechselTimer)
+      const jetzt = new Date()
+      const naechsterTag = new Date(jetzt)
+      naechsterTag.setHours(24, 0, 1, 0)
+      tageswechselTimer = window.setTimeout(() => {
+        datumAktualisieren()
+        naechstenTageswechselPlanen()
+      }, Math.max(1000, naechsterTag.getTime() - jetzt.getTime()))
+    }
+
+    const sichtbarkeitPruefen = () => {
+      if (document.visibilityState === 'visible') datumAktualisieren()
+    }
+
+    datumAktualisieren()
+    naechstenTageswechselPlanen()
+    window.addEventListener('focus', datumAktualisieren)
+    document.addEventListener('visibilitychange', sichtbarkeitPruefen)
+
+    return () => {
+      if (tageswechselTimer) window.clearTimeout(tageswechselTimer)
+      window.removeEventListener('focus', datumAktualisieren)
+      document.removeEventListener('visibilitychange', sichtbarkeitPruefen)
+    }
+  }, [])
 
   useEffect(() => {
     if (!user) return undefined
@@ -271,6 +321,35 @@ export default function Aufgaben() {
     )
     return () => { unsubAufgaben(); unsubKategorien() }
   }, [user])
+
+  useEffect(() => {
+    if (!user || !aufgabenGeladen || !heute) return
+
+    const zuUebertragen = aufgaben.filter((aufgabe) => (
+      aufgabe.offeneRueckmeldung === true
+      && aufgabe.erledigt !== true
+      && Boolean(aufgabe.faelligAm)
+      && aufgabe.faelligAm < heute
+      && !laufendeRueckmeldungsUebertragungen.current.has(aufgabe.id)
+    ))
+
+    if (!zuUebertragen.length) return
+
+    zuUebertragen.forEach((aufgabe) => laufendeRueckmeldungsUebertragungen.current.add(aufgabe.id))
+
+    Promise.all(zuUebertragen.map((aufgabe) => updateDoc(doc(db, 'suiteAufgaben', aufgabe.id), {
+      faelligAm: heute,
+      rueckmeldungUebertragenAm: serverTimestamp(),
+      aktualisiertAm: serverTimestamp(),
+    })))
+      .catch((error) => {
+        console.error(error)
+        setFehler('Offene Rückmeldungen konnten nicht automatisch auf den aktuellen Tag übertragen werden.')
+      })
+      .finally(() => {
+        zuUebertragen.forEach((aufgabe) => laufendeRueckmeldungsUebertragungen.current.delete(aufgabe.id))
+      })
+  }, [aufgaben, aufgabenGeladen, heute, user])
 
 
   useEffect(() => {
@@ -386,9 +465,9 @@ export default function Aufgaben() {
   }, [bereichKategorien, bereich, user?.uid])
   const standardKategorie = bereichKategorien.find((item) => item.id === `allgemein-${user?.uid}-${bereich}`)
     || bereichKategorien.find((item) => String(item.name || '').trim().toLocaleLowerCase('de-DE') === STANDARD_KATEGORIE.toLocaleLowerCase('de-DE'))
-  const heute = heuteIso()
   const offenePrioritaetenSchluessel = user ? `sven-suite-aufgaben-prioritaeten-${user.uid}` : ''
   const offeneDatumsGruppenSchluessel = user ? `sven-suite-aufgaben-datumsgruppen-${user.uid}` : ''
+  const offeneRueckmeldungsGruppenSchluessel = user ? `sven-suite-aufgaben-rueckmeldungsgruppen-${user.uid}` : ''
   const manuelleSortierungSchluessel = user ? `sven-suite-aufgaben-manuell-${user.uid}` : ''
   const bereichSchluessel = user ? `sven-suite-aufgaben-bereich-${user.uid}` : ''
   const bereichName = bereich === 'privat' ? 'Privat' : 'Arbeit'
@@ -575,6 +654,18 @@ export default function Aufgaben() {
       const naechsterStand = { ...vorher, [id]: !istAktuellOffen }
       if (offeneDatumsGruppenSchluessel) {
         localStorage.setItem(offeneDatumsGruppenSchluessel, JSON.stringify(naechsterStand))
+      }
+      return naechsterStand
+    })
+  }
+
+  function rueckmeldungsGruppeUmschalten(id) {
+    setOffeneRueckmeldungsGruppen((vorher) => {
+      const hatGespeichertenStand = Object.prototype.hasOwnProperty.call(vorher, id)
+      const istAktuellOffen = hatGespeichertenStand ? vorher[id] !== false : true
+      const naechsterStand = { ...vorher, [id]: !istAktuellOffen }
+      if (offeneRueckmeldungsGruppenSchluessel) {
+        localStorage.setItem(offeneRueckmeldungsGruppenSchluessel, JSON.stringify(naechsterStand))
       }
       return naechsterStand
     })
@@ -1653,7 +1744,7 @@ export default function Aufgaben() {
             <Box>
               <Typography variant="h6" fontWeight={800}>Aufgaben nach Priorität</Typography>
               <Typography variant="body2" color="text.secondary">
-                Prioritätsgruppen und Fälligkeitstage anklicken, um sie ein- oder auszuklappen. Innerhalb jedes Tages gibt es „Aufgaben“ und „Offene Rückmeldungen“; Aufgaben können per Drag & Drop zwischen beiden Bereichen verschoben werden.
+                Prioritätsgruppen und Fälligkeitstage anklicken, um sie ein- oder auszuklappen. „Offene Rückmeldungen“ sind ebenfalls einklappbar, per Drag & Drop befüllbar und werden unerledigt automatisch auf den nächsten Tag übertragen.
               </Typography>
             </Box>
             {prioritaetsGruppen.length > 1 && (
@@ -1802,51 +1893,98 @@ export default function Aufgaben() {
                                   offeneRueckmeldung: true,
                                   aufgaben: datumsGruppe.aufgaben.filter((aufgabe) => aufgabe.offeneRueckmeldung === true),
                                 },
-                              ].map((tagesKategorie) => (
-                                <Box
-                                  key={`${datumsGruppe.id}-${tagesKategorie.id}`}
-                                  onDragOver={(event) => {
-                                    if (sortierungSpeichert) return
-                                    event.preventDefault()
-                                    event.dataTransfer.dropEffect = 'move'
-                                  }}
-                                  onDrop={(event) => aufgabeTagesKategorieAendern(
-                                    event,
-                                    datumsGruppe.datum,
-                                    datumsGruppe.istUeberfaelligGruppe === true,
-                                    tagesKategorie.offeneRueckmeldung,
-                                  )}
-                                  sx={{
-                                    p: { xs: 0.75, sm: 1 },
-                                    border: '1px dashed',
-                                    borderColor: tagesKategorie.offeneRueckmeldung ? 'info.main' : 'divider',
-                                    borderRadius: 1.5,
-                                    bgcolor: tagesKategorie.offeneRueckmeldung ? 'rgba(2, 136, 209, 0.045)' : 'transparent',
-                                    minWidth: 0,
-                                  }}
-                                >
-                                  <Stack direction="row" alignItems="center" justifyContent="space-between" gap={1} sx={{ mb: 0.75 }}>
-                                    <Typography
-                                      variant="subtitle2"
-                                      fontWeight={850}
-                                      color={tagesKategorie.offeneRueckmeldung ? 'info.main' : 'text.primary'}
-                                    >
-                                      {tagesKategorie.name}
-                                    </Typography>
-                                    <Chip size="small" label={tagesKategorie.aufgaben.length} variant="outlined" />
-                                  </Stack>
-                                  <Stack spacing={1.25}>
-                                    {!tagesKategorie.aufgaben.length && (
-                                      <Typography variant="body2" color="text.secondary" sx={{ py: 0.5 }}>
-                                        {tagesKategorie.offeneRueckmeldung
-                                          ? 'Aufgabe hierher ziehen, wenn eine Rückmeldung aussteht.'
-                                          : 'Aufgabe hierher ziehen, um sie wieder als normale Aufgabe zu führen.'}
-                                      </Typography>
+                              ].map((tagesKategorie) => {
+                                const rueckmeldungsGruppeId = `${datumsGruppe.id}-rueckmeldungen`
+                                const rueckmeldungsGruppeIstOffen = !tagesKategorie.offeneRueckmeldung
+                                  || !Object.prototype.hasOwnProperty.call(offeneRueckmeldungsGruppen, rueckmeldungsGruppeId)
+                                  || offeneRueckmeldungsGruppen[rueckmeldungsGruppeId] !== false
+
+                                return (
+                                  <Box
+                                    key={`${datumsGruppe.id}-${tagesKategorie.id}`}
+                                    onDragOver={(event) => {
+                                      if (sortierungSpeichert) return
+                                      event.preventDefault()
+                                      event.dataTransfer.dropEffect = 'move'
+                                    }}
+                                    onDrop={(event) => aufgabeTagesKategorieAendern(
+                                      event,
+                                      datumsGruppe.datum,
+                                      datumsGruppe.istUeberfaelligGruppe === true,
+                                      tagesKategorie.offeneRueckmeldung,
                                     )}
-                                    {tagesKategorie.aufgaben.map((aufgabe) => aufgabeKarte(aufgabe))}
-                                  </Stack>
-                                </Box>
-                              ))}
+                                    sx={{
+                                      p: { xs: 0.75, sm: 1 },
+                                      border: '1px dashed',
+                                      borderColor: tagesKategorie.offeneRueckmeldung ? 'info.main' : 'divider',
+                                      borderRadius: 1.5,
+                                      bgcolor: tagesKategorie.offeneRueckmeldung ? 'rgba(2, 136, 209, 0.045)' : 'transparent',
+                                      minWidth: 0,
+                                    }}
+                                  >
+                                    <Stack
+                                      direction="row"
+                                      alignItems="center"
+                                      justifyContent="space-between"
+                                      gap={1}
+                                      role={tagesKategorie.offeneRueckmeldung ? 'button' : undefined}
+                                      tabIndex={tagesKategorie.offeneRueckmeldung ? 0 : undefined}
+                                      aria-expanded={tagesKategorie.offeneRueckmeldung ? rueckmeldungsGruppeIstOffen : undefined}
+                                      onClick={tagesKategorie.offeneRueckmeldung
+                                        ? () => rueckmeldungsGruppeUmschalten(rueckmeldungsGruppeId)
+                                        : undefined}
+                                      onKeyDown={tagesKategorie.offeneRueckmeldung
+                                        ? (event) => {
+                                          if (event.key === 'Enter' || event.key === ' ') {
+                                            event.preventDefault()
+                                            rueckmeldungsGruppeUmschalten(rueckmeldungsGruppeId)
+                                          }
+                                        }
+                                        : undefined}
+                                      sx={{
+                                        mb: rueckmeldungsGruppeIstOffen ? 0.75 : 0,
+                                        cursor: tagesKategorie.offeneRueckmeldung ? 'pointer' : 'default',
+                                        borderRadius: 1,
+                                        '&:hover': tagesKategorie.offeneRueckmeldung ? { bgcolor: 'action.hover' } : undefined,
+                                      }}
+                                    >
+                                      <Stack direction="row" alignItems="center" gap={0.5} minWidth={0}>
+                                        {tagesKategorie.offeneRueckmeldung && (
+                                          <IconButton
+                                            size="small"
+                                            tabIndex={-1}
+                                            aria-label={rueckmeldungsGruppeIstOffen ? 'Offene Rückmeldungen einklappen' : 'Offene Rückmeldungen ausklappen'}
+                                            sx={{ flexShrink: 0 }}
+                                          >
+                                            {rueckmeldungsGruppeIstOffen ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
+                                          </IconButton>
+                                        )}
+                                        <Typography
+                                          variant="subtitle2"
+                                          fontWeight={850}
+                                          color={tagesKategorie.offeneRueckmeldung ? 'info.main' : 'text.primary'}
+                                          sx={{ overflowWrap: 'anywhere' }}
+                                        >
+                                          {tagesKategorie.name}
+                                        </Typography>
+                                      </Stack>
+                                      <Chip size="small" label={tagesKategorie.aufgaben.length} variant="outlined" />
+                                    </Stack>
+                                    <Collapse in={rueckmeldungsGruppeIstOffen} timeout="auto">
+                                      <Stack spacing={1.25}>
+                                        {!tagesKategorie.aufgaben.length && (
+                                          <Typography variant="body2" color="text.secondary" sx={{ py: 0.5 }}>
+                                            {tagesKategorie.offeneRueckmeldung
+                                              ? 'Aufgabe hierher ziehen, wenn eine Rückmeldung aussteht.'
+                                              : 'Aufgabe hierher ziehen, um sie wieder als normale Aufgabe zu führen.'}
+                                          </Typography>
+                                        )}
+                                        {tagesKategorie.aufgaben.map((aufgabe) => aufgabeKarte(aufgabe))}
+                                      </Stack>
+                                    </Collapse>
+                                  </Box>
+                                )
+                              })}
                             </Stack>
                           </Collapse>
                         </Paper>
