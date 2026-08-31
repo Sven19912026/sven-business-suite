@@ -253,6 +253,7 @@ export default function Aufgaben() {
   const [datumSpeichertId, setDatumSpeichertId] = useState('')
   const [unteraufgabeEingaben, setUnteraufgabeEingaben] = useState({})
   const [unteraufgabeNotizEingaben, setUnteraufgabeNotizEingaben] = useState({})
+  const [unteraufgabeNotizEntwuerfe, setUnteraufgabeNotizEntwuerfe] = useState({})
   const [unteraufgabeSpeichertId, setUnteraufgabeSpeichertId] = useState('')
   const [offeneUnteraufgabeNotizen, setOffeneUnteraufgabeNotizen] = useState({})
   const [tagesablaufDatum, setTagesablaufDatum] = useState(() => heuteIso())
@@ -505,7 +506,7 @@ export default function Aufgaben() {
       .filter((item) => {
         if (!term) return true
         const unteraufgabenText = unteraufgabenNormalisieren(item.unteraufgaben)
-          .map((unteraufgabe) => `${unteraufgabe.titel} ${unteraufgabe.notiz}`)
+          .map((unteraufgabe) => `${unteraufgabe.titel} ${richTextToPlainText(unteraufgabe.notiz)}`)
           .join(' ')
         return [
           item.titel,
@@ -940,7 +941,7 @@ export default function Aufgaben() {
 
   async function unteraufgabeHinzufuegen(aufgabe) {
     const titel = String(unteraufgabeEingaben[aufgabe.id] || '').trim()
-    const notiz = String(unteraufgabeNotizEingaben[aufgabe.id] || '').trim()
+    const notiz = cleanRichTextForStorage(unteraufgabeNotizEingaben[aufgabe.id] || '')
     if (!user || !titel || unteraufgabeSpeichertId === aufgabe.id) return
 
     setUnteraufgabeSpeichertId(aufgabe.id)
@@ -999,12 +1000,13 @@ export default function Aufgaben() {
   }
 
   async function unteraufgabeNotizAendern(aufgabe, unteraufgabeId, notiz) {
-    if (!user || unteraufgabeSpeichertId === aufgabe.id) return
+    if (!user || unteraufgabeSpeichertId === aufgabe.id) return false
 
     const normalisierteUnteraufgaben = unteraufgabenNormalisieren(aufgabe.unteraufgaben)
     const aktuelleUnteraufgabe = normalisierteUnteraufgaben.find((unteraufgabe) => unteraufgabe.id === unteraufgabeId)
-    const neueNotiz = String(notiz || '').trim()
-    if (!aktuelleUnteraufgabe || aktuelleUnteraufgabe.notiz === neueNotiz) return
+    const neueNotiz = cleanRichTextForStorage(notiz)
+    if (!aktuelleUnteraufgabe) return false
+    if (cleanRichTextForStorage(aktuelleUnteraufgabe.notiz) === neueNotiz) return true
 
     setUnteraufgabeSpeichertId(aufgabe.id)
     setFehler('')
@@ -1018,12 +1020,33 @@ export default function Aufgaben() {
         unteraufgaben,
         aktualisiertAm: serverTimestamp(),
       })
+      setAufgaben((vorher) => vorher.map((item) => (
+        item.id === aufgabe.id ? { ...item, unteraufgaben } : item
+      )))
+      return true
     } catch (error) {
       console.error(error)
       setFehler('Notiz der Unteraufgabe konnte nicht gespeichert werden.')
+      return false
     } finally {
       setUnteraufgabeSpeichertId('')
     }
+  }
+
+  async function unteraufgabeNotizEntwurfSpeichern(aufgabe, unteraufgabeId) {
+    const schluessel = `${aufgabe.id}:${unteraufgabeId}`
+    if (!Object.prototype.hasOwnProperty.call(unteraufgabeNotizEntwuerfe, schluessel)) return
+
+    const entwurf = unteraufgabeNotizEntwuerfe[schluessel]
+    const gespeichert = await unteraufgabeNotizAendern(aufgabe, unteraufgabeId, entwurf)
+    if (!gespeichert) return
+
+    setUnteraufgabeNotizEntwuerfe((vorher) => {
+      if (vorher[schluessel] !== entwurf) return vorher
+      const naechsterStand = { ...vorher }
+      delete naechsterStand[schluessel]
+      return naechsterStand
+    })
   }
 
   async function unteraufgabeStatusAendern(aufgabe, unteraufgabeId) {
@@ -1456,34 +1479,33 @@ export default function Aufgaben() {
                                                         </Tooltip>
                                                       </Stack>
                                                       <Collapse in={Boolean(offeneUnteraufgabeNotizen[`${aufgabe.id}:${unteraufgabe.id}`])} timeout="auto" unmountOnExit>
-                                                        <TextField
-                                                          key={`${unteraufgabe.id}-${unteraufgabe.notiz}`}
-                                                          size="small"
-                                                          fullWidth
-                                                          multiline
-                                                          minRows={2}
-                                                          variant="outlined"
-                                                          label="Notiz zur Unteraufgabe"
-                                                          placeholder="Notiz hinzufügen …"
-                                                          defaultValue={unteraufgabe.notiz}
-                                                          disabled={unteraufgabeSpeichertId === aufgabe.id}
-                                                          onBlur={(event) => unteraufgabeNotizAendern(
-                                                            aufgabe,
-                                                            unteraufgabe.id,
-                                                            event.target.value,
-                                                          )}
+                                                        <Box
+                                                          onBlur={(event) => {
+                                                            if (event.currentTarget.contains(event.relatedTarget)) return
+                                                            unteraufgabeNotizEntwurfSpeichern(aufgabe, unteraufgabe.id)
+                                                          }}
                                                           sx={{
                                                             mt: 0.75,
                                                             ml: { xs: 0, sm: 4.25 },
                                                             width: { xs: '100%', sm: 'calc(100% - 34px)' },
-                                                            '& .MuiInputBase-input': {
-                                                              color: unteraufgabe.erledigt ? 'text.disabled' : 'text.primary',
-                                                            },
-                                                            '& .MuiInputLabel-root': {
-                                                              color: unteraufgabe.erledigt ? 'text.disabled' : undefined,
-                                                            },
+                                                            opacity: unteraufgabe.erledigt ? 0.78 : 1,
                                                           }}
-                                                        />
+                                                        >
+                                                          <RichTextEditor
+                                                            label="Notiz zur Unteraufgabe"
+                                                            value={Object.prototype.hasOwnProperty.call(
+                                                              unteraufgabeNotizEntwuerfe,
+                                                              `${aufgabe.id}:${unteraufgabe.id}`,
+                                                            )
+                                                              ? unteraufgabeNotizEntwuerfe[`${aufgabe.id}:${unteraufgabe.id}`]
+                                                              : unteraufgabe.notiz}
+                                                            onChange={(wert) => setUnteraufgabeNotizEntwuerfe((vorher) => ({
+                                                              ...vorher,
+                                                              [`${aufgabe.id}:${unteraufgabe.id}`]: wert,
+                                                            }))}
+                                                            minHeight={76}
+                                                          />
+                                                        </Box>
                                                       </Collapse>
                                                     </Box>
                                                   </Box>
@@ -1514,20 +1536,22 @@ export default function Aufgaben() {
                                                     }
                                                   }}
                                                 />
-                                                <TextField
-                                                  size="small"
-                                                  fullWidth
-                                                  multiline
-                                                  minRows={1}
-                                                  maxRows={4}
-                                                  label="Notiz zur Unteraufgabe (optional)"
-                                                  value={unteraufgabeNotizEingaben[aufgabe.id] || ''}
-                                                  disabled={unteraufgabeSpeichertId === aufgabe.id}
-                                                  onChange={(event) => setUnteraufgabeNotizEingaben((vorher) => ({
-                                                    ...vorher,
-                                                    [aufgabe.id]: event.target.value,
-                                                  }))}
-                                                />
+                                                <Box
+                                                  sx={{
+                                                    opacity: unteraufgabeSpeichertId === aufgabe.id ? 0.6 : 1,
+                                                    pointerEvents: unteraufgabeSpeichertId === aufgabe.id ? 'none' : 'auto',
+                                                  }}
+                                                >
+                                                  <RichTextEditor
+                                                    label="Notiz zur Unteraufgabe (optional)"
+                                                    value={unteraufgabeNotizEingaben[aufgabe.id] || ''}
+                                                    onChange={(wert) => setUnteraufgabeNotizEingaben((vorher) => ({
+                                                      ...vorher,
+                                                      [aufgabe.id]: wert,
+                                                    }))}
+                                                    minHeight={70}
+                                                  />
+                                                </Box>
                                               </Stack>
                                               <Button
                                                 size="small"
