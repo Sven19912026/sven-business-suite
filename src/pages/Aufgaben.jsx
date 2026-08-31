@@ -249,6 +249,8 @@ export default function Aufgaben() {
   })
   const [gezogeneAufgabeId, setGezogeneAufgabeId] = useState('')
   const [dragUeberAufgabeId, setDragUeberAufgabeId] = useState('')
+  const [gezogeneUnteraufgabe, setGezogeneUnteraufgabe] = useState({ aufgabeId: '', unteraufgabeId: '' })
+  const [dragUeberUnteraufgabeId, setDragUeberUnteraufgabeId] = useState('')
   const [sortierungSpeichert, setSortierungSpeichert] = useState(false)
   const [datumSpeichertId, setDatumSpeichertId] = useState('')
   const [unteraufgabeEingaben, setUnteraufgabeEingaben] = useState({})
@@ -696,6 +698,8 @@ export default function Aufgaben() {
     setManuelleSortierung(aktiviert)
     setGezogeneAufgabeId('')
     setDragUeberAufgabeId('')
+    setGezogeneUnteraufgabe({ aufgabeId: '', unteraufgabeId: '' })
+    setDragUeberUnteraufgabeId('')
     if (manuelleSortierungSchluessel) {
       localStorage.setItem(manuelleSortierungSchluessel, String(aktiviert))
     }
@@ -936,6 +940,97 @@ export default function Aufgaben() {
       setFehler('Fälligkeitsdatum konnte nicht geändert werden.')
     } finally {
       setDatumSpeichertId('')
+    }
+  }
+
+  function unteraufgabeDragStarten(event, aufgabe, unteraufgabe) {
+    event.stopPropagation()
+    if (!manuelleSortierung || unteraufgabeSpeichertId === aufgabe.id) {
+      event.preventDefault()
+      return
+    }
+
+    const payload = `${aufgabe.id}:${unteraufgabe.id}`
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData('application/x-sven-unteraufgabe', payload)
+    event.dataTransfer.setData('text/plain', `unteraufgabe:${payload}`)
+    setGezogeneUnteraufgabe({ aufgabeId: aufgabe.id, unteraufgabeId: unteraufgabe.id })
+    setDragUeberUnteraufgabeId('')
+  }
+
+  function unteraufgabeDragUeber(event, aufgabe, unteraufgabe) {
+    if (
+      !manuelleSortierung
+      || unteraufgabeSpeichertId === aufgabe.id
+      || gezogeneUnteraufgabe.aufgabeId !== aufgabe.id
+      || !gezogeneUnteraufgabe.unteraufgabeId
+    ) return
+
+    event.preventDefault()
+    event.stopPropagation()
+    event.dataTransfer.dropEffect = 'move'
+    setDragUeberUnteraufgabeId(`${aufgabe.id}:${unteraufgabe.id}`)
+  }
+
+  function unteraufgabeDragBeenden(event) {
+    event?.stopPropagation?.()
+    setGezogeneUnteraufgabe({ aufgabeId: '', unteraufgabeId: '' })
+    setDragUeberUnteraufgabeId('')
+  }
+
+  async function unteraufgabeAblegen(event, aufgabe, zielUnteraufgabeId) {
+    event.preventDefault()
+    event.stopPropagation()
+
+    if (!manuelleSortierung || unteraufgabeSpeichertId === aufgabe.id) {
+      unteraufgabeDragBeenden()
+      return
+    }
+
+    const payload = event.dataTransfer.getData('application/x-sven-unteraufgabe')
+    const [payloadAufgabeId = '', payloadUnteraufgabeId = ''] = payload.split(':')
+    const quellAufgabeId = payloadAufgabeId || gezogeneUnteraufgabe.aufgabeId
+    const quellUnteraufgabeId = payloadUnteraufgabeId || gezogeneUnteraufgabe.unteraufgabeId
+
+    if (!quellUnteraufgabeId || quellUnteraufgabeId === zielUnteraufgabeId) {
+      unteraufgabeDragBeenden()
+      return
+    }
+
+    if (quellAufgabeId !== aufgabe.id) {
+      setFehler('Unteraufgaben können nur innerhalb derselben Hauptaufgabe sortiert werden.')
+      unteraufgabeDragBeenden()
+      return
+    }
+
+    const unteraufgaben = unteraufgabenNormalisieren(aufgabe.unteraufgaben)
+    const quellIndex = unteraufgaben.findIndex((unteraufgabe) => unteraufgabe.id === quellUnteraufgabeId)
+    const zielIndex = unteraufgaben.findIndex((unteraufgabe) => unteraufgabe.id === zielUnteraufgabeId)
+    if (quellIndex < 0 || zielIndex < 0) {
+      unteraufgabeDragBeenden()
+      return
+    }
+
+    const neueUnteraufgaben = [...unteraufgaben]
+    const [verschobeneUnteraufgabe] = neueUnteraufgaben.splice(quellIndex, 1)
+    neueUnteraufgaben.splice(zielIndex, 0, verschobeneUnteraufgabe)
+
+    setUnteraufgabeSpeichertId(aufgabe.id)
+    setFehler('')
+    try {
+      await updateDoc(doc(db, 'suiteAufgaben', aufgabe.id), {
+        unteraufgaben: neueUnteraufgaben,
+        aktualisiertAm: serverTimestamp(),
+      })
+      setAufgaben((vorher) => vorher.map((item) => (
+        item.id === aufgabe.id ? { ...item, unteraufgaben: neueUnteraufgaben } : item
+      )))
+    } catch (error) {
+      console.error(error)
+      setFehler('Die Reihenfolge der Unteraufgaben konnte nicht gespeichert werden.')
+    } finally {
+      setUnteraufgabeSpeichertId('')
+      unteraufgabeDragBeenden()
     }
   }
 
@@ -1392,6 +1487,8 @@ export default function Aufgaben() {
                                                 {unteraufgaben.map((unteraufgabe) => (
                                                   <Box
                                                     key={unteraufgabe.id}
+                                                    onDragOver={(event) => unteraufgabeDragUeber(event, aufgabe, unteraufgabe)}
+                                                    onDrop={(event) => unteraufgabeAblegen(event, aufgabe, unteraufgabe.id)}
                                                     sx={{
                                                       minWidth: 0,
                                                       px: 0.5,
@@ -1399,7 +1496,10 @@ export default function Aufgaben() {
                                                       borderRadius: 1,
                                                       bgcolor: unteraufgabe.erledigt ? 'action.disabledBackground' : 'transparent',
                                                       opacity: unteraufgabe.erledigt ? 0.62 : 1,
-                                                      transition: 'background-color 160ms ease, opacity 160ms ease',
+                                                      outline: dragUeberUnteraufgabeId === `${aufgabe.id}:${unteraufgabe.id}` ? '2px solid' : 'none',
+                                                      outlineColor: 'primary.main',
+                                                      outlineOffset: '-1px',
+                                                      transition: 'background-color 160ms ease, opacity 160ms ease, outline-color 160ms ease',
                                                       '&:hover': {
                                                         bgcolor: unteraufgabe.erledigt ? 'action.disabledBackground' : 'action.hover',
                                                       },
@@ -1407,6 +1507,26 @@ export default function Aufgaben() {
                                                   >
                                                     <Box sx={{ minWidth: 0 }}>
                                                       <Stack direction="row" alignItems="flex-start" gap={0.25} sx={{ minWidth: 0 }}>
+                                                        <Tooltip title={manuelleSortierung ? 'Unteraufgabe ziehen zum Sortieren' : '„Individuell sortieren“ aktivieren'}>
+                                                          <Box
+                                                            draggable={manuelleSortierung && unteraufgabeSpeichertId !== aufgabe.id}
+                                                            onDragStart={(event) => unteraufgabeDragStarten(event, aufgabe, unteraufgabe)}
+                                                            onDragEnd={unteraufgabeDragBeenden}
+                                                            aria-label={`Unteraufgabe ${unteraufgabe.titel} verschieben`}
+                                                            sx={{
+                                                              display: 'grid',
+                                                              placeItems: 'center',
+                                                              width: 26,
+                                                              minHeight: 34,
+                                                              flexShrink: 0,
+                                                              color: manuelleSortierung ? 'text.secondary' : 'action.disabled',
+                                                              cursor: manuelleSortierung ? 'grab' : 'default',
+                                                              '&:active': manuelleSortierung ? { cursor: 'grabbing' } : undefined,
+                                                            }}
+                                                          >
+                                                            <DragIndicatorIcon fontSize="small" />
+                                                          </Box>
+                                                        </Tooltip>
                                                         <Checkbox
                                                           size="small"
                                                           checked={unteraufgabe.erledigt}
@@ -1781,7 +1901,7 @@ export default function Aufgaben() {
 
           {manuelleSortierung && (
             <Alert severity="info">
-              Ziehe Aufgaben am Griff in die gewünschte Reihenfolge. Sortieren ist nur innerhalb derselben Priorität, desselben Fälligkeitstags und derselben Tageskategorie möglich.
+              Ziehe Aufgaben oder Unteraufgaben am Griff in die gewünschte Reihenfolge. Aufgaben bleiben innerhalb derselben Priorität, desselben Fälligkeitstags und derselben Tageskategorie; Unteraufgaben bleiben innerhalb ihrer Hauptaufgabe.
             </Alert>
           )}
 
