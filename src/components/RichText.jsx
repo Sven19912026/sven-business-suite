@@ -38,11 +38,24 @@ function editorHtml(value) {
 export function RichTextEditor({ label, value, onChange, minHeight = 120 }) {
   const editorRef = useRef(null)
   const auswahlRef = useRef(null)
+  const letzteInterneAenderungRef = useRef(null)
 
   useEffect(() => {
     const editor = editorRef.current
     if (!editor) return
-    const html = editorHtml(value)
+
+    const rohwert = String(value || '')
+
+    // contentEditable verwaltet den Cursor selbst. Wenn die Aenderung direkt
+    // aus diesem Editor stammt, darf innerHTML nicht erneut gesetzt werden.
+    // Sonst verliert der Browser bei Leerzeichen/Zeilenumbruechen die
+    // Cursorposition und springt an den Anfang des Textes.
+    if (letzteInterneAenderungRef.current === rohwert) {
+      letzteInterneAenderungRef.current = null
+      return
+    }
+
+    const html = editorHtml(rohwert)
     if (editor.innerHTML !== html) editor.innerHTML = html
   }, [value])
 
@@ -69,7 +82,9 @@ export function RichTextEditor({ label, value, onChange, minHeight = 120 }) {
   function aenderungMelden() {
     const editor = editorRef.current
     if (!editor) return
-    onChange(editor.innerHTML)
+    const html = editor.innerHTML
+    letzteInterneAenderungRef.current = html
+    onChange(html)
     auswahlMerken()
   }
 
