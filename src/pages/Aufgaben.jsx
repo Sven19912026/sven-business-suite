@@ -147,8 +147,19 @@ function neueUnteraufgabeId() {
   return `unteraufgabe-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
 }
 
+const MAX_TAGESABLAUF_SEITEN = 4
+
 function tagesablaufDokumentId(userId, bereich, datum) {
   return `${String(userId || '').replace(/[^a-zA-Z0-9_-]/g, '-')}-${bereich}-${datum}`
+}
+
+function tagesablaufSeitenNormalisieren(data) {
+  const gespeicherteSeiten = Array.isArray(data?.seiten)
+    ? data.seiten.map((inhalt) => String(inhalt || ''))
+    : [String(data?.inhalt || '')]
+
+  const seiten = gespeicherteSeiten.slice(0, MAX_TAGESABLAUF_SEITEN)
+  return seiten.length ? seiten : ['']
 }
 
 function Kennzahl({ icon, label, wert }) {
@@ -259,8 +270,9 @@ export default function Aufgaben() {
   const [unteraufgabeSpeichertId, setUnteraufgabeSpeichertId] = useState('')
   const [offeneUnteraufgabeNotizen, setOffeneUnteraufgabeNotizen] = useState({})
   const [tagesablaufDatum, setTagesablaufDatum] = useState(() => heuteIso())
-  const [tagesablaufInhalt, setTagesablaufInhalt] = useState('')
-  const [tagesablaufEntwurf, setTagesablaufEntwurf] = useState('')
+  const [tagesablaufSeiten, setTagesablaufSeiten] = useState([''])
+  const [tagesablaufEntwuerfe, setTagesablaufEntwuerfe] = useState([''])
+  const [tagesablaufSeite, setTagesablaufSeite] = useState(0)
   const [tagesablaufOffen, setTagesablaufOffen] = useState(false)
   const [tagesablaufGeladen, setTagesablaufGeladen] = useState(false)
   const [tagesablaufSpeichert, setTagesablaufSpeichert] = useState(false)
@@ -367,9 +379,12 @@ export default function Aufgaben() {
     return onSnapshot(
       tagesablaufRef,
       (snapshot) => {
-        const inhalt = snapshot.exists() ? String(snapshot.data()?.inhalt || '') : ''
-        setTagesablaufInhalt(inhalt)
-        setTagesablaufEntwurf(inhalt)
+        const seiten = snapshot.exists()
+          ? tagesablaufSeitenNormalisieren(snapshot.data())
+          : ['']
+        setTagesablaufSeiten(seiten)
+        setTagesablaufEntwuerfe(seiten)
+        setTagesablaufSeite((aktuelleSeite) => Math.min(aktuelleSeite, seiten.length - 1))
         setTagesablaufGeladen(true)
       },
       (error) => {
@@ -474,7 +489,24 @@ export default function Aufgaben() {
   const manuelleSortierungSchluessel = user ? `sven-suite-aufgaben-manuell-${user.uid}` : ''
   const bereichSchluessel = user ? `sven-suite-aufgaben-bereich-${user.uid}` : ''
   const bereichName = bereich === 'privat' ? 'Privat' : 'Arbeit'
-  const tagesablaufHatAenderungen = tagesablaufEntwurf !== tagesablaufInhalt
+  const tagesablaufInhalt = tagesablaufSeiten[tagesablaufSeite] || ''
+  const tagesablaufEntwurf = tagesablaufEntwuerfe[tagesablaufSeite] || ''
+  const tagesablaufSeitenAnzahl = tagesablaufEntwuerfe.length
+  const tagesablaufHatAenderungen = JSON.stringify(tagesablaufEntwuerfe) !== JSON.stringify(tagesablaufSeiten)
+
+  function tagesablaufEntwurfAktualisieren(inhalt) {
+    setTagesablaufEntwuerfe((vorher) => vorher.map((seite, index) => (
+      index === tagesablaufSeite ? inhalt : seite
+    )))
+  }
+
+  function tagesablaufSeiteHinzufuegen() {
+    if (tagesablaufEntwuerfe.length >= MAX_TAGESABLAUF_SEITEN) return
+    const neueSeite = tagesablaufEntwuerfe.length
+    setTagesablaufEntwuerfe((vorher) => [...vorher, ''])
+    setTagesablaufSeite(neueSeite)
+    setTagesablaufOffen(true)
+  }
 
   // Nur Aufgaben mit einer ausdrücklichen Bereichszuordnung werden angezeigt.
   // Bestehende Aufgaben ohne "bereich" bleiben unverändert und werden nicht automatisch migriert.
@@ -584,6 +616,9 @@ export default function Aufgaben() {
     ) return
 
     setTagesablaufGeladen(false)
+    setTagesablaufSeiten([''])
+    setTagesablaufEntwuerfe([''])
+    setTagesablaufSeite(0)
     setBereich(neuerBereich)
     setFilterKategorie('Alle')
     if (bereichSchluessel) localStorage.setItem(bereichSchluessel, neuerBereich)
@@ -597,6 +632,9 @@ export default function Aufgaben() {
       && !window.confirm('Im Tagesablauf gibt es ungespeicherte Änderungen. Datum trotzdem wechseln?')
     ) return
     setTagesablaufGeladen(false)
+    setTagesablaufSeiten([''])
+    setTagesablaufEntwuerfe([''])
+    setTagesablaufSeite(0)
     setTagesablaufDatum(neuesDatum)
   }
 
@@ -606,7 +644,11 @@ export default function Aufgaben() {
     setTagesablaufSpeichert(true)
     setFehler('')
     try {
-      const inhalt = cleanRichTextForStorage(tagesablaufEntwurf)
+      const seiten = tagesablaufEntwuerfe
+        .slice(0, MAX_TAGESABLAUF_SEITEN)
+        .map((inhalt) => cleanRichTextForStorage(inhalt))
+      if (!seiten.length) seiten.push('')
+
       await setDoc(
         doc(
           db,
@@ -617,13 +659,15 @@ export default function Aufgaben() {
           userId: user.uid,
           bereich,
           datum: tagesablaufDatum,
-          inhalt,
+          inhalt: seiten[0] || '',
+          seiten,
+          seitenAnzahl: seiten.length,
           aktualisiertAm: serverTimestamp(),
         },
         { merge: true },
       )
-      setTagesablaufInhalt(inhalt)
-      setTagesablaufEntwurf(inhalt)
+      setTagesablaufSeiten(seiten)
+      setTagesablaufEntwuerfe(seiten)
     } catch (error) {
       console.error(error)
       setFehler('Tagesablauf konnte nicht gespeichert werden.')
@@ -1782,6 +1826,9 @@ export default function Aufgaben() {
               <Stack direction="row" gap={0.75} alignItems="center" flexWrap="wrap" useFlexGap>
                 <Typography fontWeight={850}>Tagesablauf</Typography>
                 {tagesablaufDatum === heute && <Chip size="small" color="warning" label="Heute" />}
+                {tagesablaufSeitenAnzahl > 1 && (
+                  <Chip size="small" variant="outlined" label={`Seite ${tagesablaufSeite + 1}/${tagesablaufSeitenAnzahl}`} />
+                )}
                 {tagesablaufHatAenderungen && <Chip size="small" color="warning" variant="outlined" label="Ungespeichert" />}
               </Stack>
               <Typography variant="body2" color="text.secondary" sx={{ textTransform: 'capitalize' }}>
@@ -1818,10 +1865,36 @@ export default function Aufgaben() {
               <Typography color="text.secondary">Tagesablauf wird geladen …</Typography>
             ) : (
               <Stack spacing={1.25}>
+                <Stack direction="row" gap={0.75} alignItems="center" flexWrap="wrap" useFlexGap>
+                  {tagesablaufEntwuerfe.map((_seite, index) => (
+                    <Button
+                      key={`tagesablauf-seite-${index + 1}`}
+                      size="small"
+                      variant={index === tagesablaufSeite ? 'contained' : 'outlined'}
+                      onClick={() => setTagesablaufSeite(index)}
+                      sx={{ minWidth: 42 }}
+                    >
+                      {index + 1}
+                    </Button>
+                  ))}
+                  {tagesablaufSeitenAnzahl < MAX_TAGESABLAUF_SEITEN && (
+                    <Button
+                      size="small"
+                      variant="text"
+                      startIcon={<AddIcon />}
+                      onClick={tagesablaufSeiteHinzufuegen}
+                    >
+                      Seite
+                    </Button>
+                  )}
+                  <Typography variant="caption" color="text.secondary" sx={{ ml: { sm: 'auto' } }}>
+                    Seite {tagesablaufSeite + 1} von {tagesablaufSeitenAnzahl} · max. {MAX_TAGESABLAUF_SEITEN}
+                  </Typography>
+                </Stack>
                 <RichTextEditor
-                  label={`Notiz für ${datumFormatieren(tagesablaufDatum)}`}
+                  label={`Notiz für ${datumFormatieren(tagesablaufDatum)} · Seite ${tagesablaufSeite + 1}`}
                   value={tagesablaufEntwurf}
-                  onChange={setTagesablaufEntwurf}
+                  onChange={tagesablaufEntwurfAktualisieren}
                   minHeight={180}
                 />
                 <Stack
@@ -1831,7 +1904,7 @@ export default function Aufgaben() {
                   gap={1}
                 >
                   <Typography variant="caption" color="text.secondary">
-                    Beliebig lange Tagesnotiz mit Fett, Kursiv, Unterstrichen, Schriftfarbe und Zeilenumbrüchen.
+                    Bis zu vier Tagesablauf-Seiten mit Fett, Kursiv, Unterstrichen, Schriftfarbe und Zeilenumbrüchen.
                   </Typography>
                   <Button
                     variant="contained"
