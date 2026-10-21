@@ -32,6 +32,7 @@ import DeleteIcon from '@mui/icons-material/Delete'
 import EditIcon from '@mui/icons-material/Edit'
 import ExpandLessIcon from '@mui/icons-material/ExpandLess'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'
 import TaskAltIcon from '@mui/icons-material/TaskAlt'
 import TodayIcon from '@mui/icons-material/Today'
 import WarningAmberIcon from '@mui/icons-material/WarningAmber'
@@ -676,13 +677,14 @@ export default function Aufgaben() {
     }
   }
 
-  function neueAufgabe(kategorieId = '', prioritaet = 'Mittel') {
+  function neueAufgabe(kategorieId = '', prioritaet = 'Mittel', faelligAm = '') {
     setAufgabeId(null)
     setAufgabeForm({
       ...LEERE_AUFGABE,
       bereich,
       kategorieId: kategorieId || standardKategorie?.id || sortierteKategorien[0]?.id || '',
       prioritaet,
+      faelligAm,
     })
     setAufgabeDialog(true)
   }
@@ -1323,6 +1325,11 @@ export default function Aufgaben() {
                                 const istDragZiel = dragUeberAufgabeId === aufgabe.id && !wirdGezogen
                                 const kategorie = kategorien.find((eintrag) => eintrag.id === aufgabe.kategorieId)
                                 const aufgabeIstOffen = offeneAufgaben[aufgabe.id] === true
+                                const hatBeschreibung = Boolean(richTextToPlainText(aufgabe.beschreibung || '').trim())
+                                const hatNotiz = Boolean(richTextToPlainText(aufgabe.notizen || '').trim())
+                                const inhaltsHinweis = hatBeschreibung && hatNotiz
+                                  ? 'Beschreibung und Notiz vorhanden'
+                                  : (hatBeschreibung ? 'Beschreibung vorhanden' : 'Notiz vorhanden')
                                 const unteraufgaben = unteraufgabenNormalisieren(aufgabe.unteraufgaben)
                                 const erledigteUnteraufgaben = unteraufgaben.filter((unteraufgabe) => unteraufgabe.erledigt).length
                                 return (
@@ -1393,24 +1400,20 @@ export default function Aufgaben() {
                                           >
                                             {aufgabe.titel}
                                           </Typography>
-                                          {!aufgabeIstOffen && aufgabe.notizen && (
-                                            <Box sx={{ mt: 0.75, color: 'text.secondary' }}>
-                                              <Typography variant="caption" color="text.secondary" fontWeight={700}>
-                                                Notiz
-                                              </Typography>
-                                              <RichTextContent
-                                                value={aufgabe.notizen}
-                                                sx={{
-                                                  mt: 0.15,
-                                                  fontSize: '0.875rem',
-                                                  lineHeight: 1.45,
-                                                  maxHeight: '4.35em',
-                                                  overflow: 'hidden',
-                                                }}
-                                              />
-                                            </Box>
-                                          )}
                                           <Stack direction="row" gap={0.75} flexWrap="wrap" mt={1.25} useFlexGap sx={{ minWidth: 0, alignItems: 'center' }}>
+                                            {!aufgabeIstOffen && (hatBeschreibung || hatNotiz) && (
+                                              <Tooltip title={`${inhaltsHinweis} – zum Anzeigen aufklappen`}>
+                                                <IconButton
+                                                  size="small"
+                                                  color="info"
+                                                  aria-label={`${inhaltsHinweis} – Aufgabe ausklappen`}
+                                                  aria-expanded={false}
+                                                  onClick={() => aufgabeUmschalten(aufgabe.id)}
+                                                >
+                                                  <InfoOutlinedIcon fontSize="small" />
+                                                </IconButton>
+                                              </Tooltip>
+                                            )}
                                             <Chip size="small" color={prioritaetsFarbe(aufgabe.prioritaet)} label={aufgabe.prioritaet || 'Mittel'} />
                                             <Chip size="small" variant="outlined" label={kategorie?.name || 'Ohne Kategorie'} sx={{ maxWidth: '100%', '& .MuiChip-label': { overflow: 'hidden', textOverflow: 'ellipsis' } }} />
                                             {aufgabe.offeneRueckmeldung === true && (
@@ -2054,6 +2057,7 @@ export default function Aufgaben() {
                             aria-expanded={datumsGruppeIstOffen}
                             onClick={() => datumsGruppeUmschalten(datumsGruppe.id, standardOffen)}
                             onKeyDown={(event) => {
+                              if (event.target !== event.currentTarget) return
                               if (event.key === 'Enter' || event.key === ' ') {
                                 event.preventDefault()
                                 datumsGruppeUmschalten(datumsGruppe.id, standardOffen)
@@ -2093,6 +2097,22 @@ export default function Aufgaben() {
                                 <Chip size="small" label={datumsGruppe.aufgaben.length} color={datumsGruppeIstOffen ? 'primary' : 'default'} />
                               </Stack>
                             </Box>
+                            <Tooltip title={gruppeIstUeberfaellig ? 'Neue Aufgabe für heute' : `Neue Aufgabe: ${datumsGruppeFormatieren(datumsGruppe.datum)}`}>
+                              <IconButton
+                                size="small"
+                                color="primary"
+                                disabled={!kategorien.length}
+                                aria-label={gruppeIstUeberfaellig ? 'Neue Aufgabe für heute' : `Neue Aufgabe: ${datumsGruppeFormatieren(datumsGruppe.datum)}`}
+                                onKeyDown={(event) => event.stopPropagation()}
+                                onClick={(event) => {
+                                  event.stopPropagation()
+                                  neueAufgabe('', gruppe.prioritaet, gruppeIstUeberfaellig ? heute : datumsGruppe.datum)
+                                }}
+                                sx={{ flexShrink: 0 }}
+                              >
+                                <AddIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
                           </Stack>
 
                           <Collapse in={datumsGruppeIstOffen} timeout="auto" unmountOnExit>
