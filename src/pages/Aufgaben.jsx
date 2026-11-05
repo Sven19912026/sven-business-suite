@@ -2302,7 +2302,24 @@ export default function Aufgaben() {
             variant="outlined"
             sx={{ alignSelf: 'flex-start', fontWeight: 750 }}
           />
-          <TextField label="Titel" value={aufgabeForm.titel} onChange={(e) => setAufgabeForm({ ...aufgabeForm, titel: e.target.value })} required autoFocus />
+          <TextField
+            label="Titel"
+            value={aufgabeForm.titel}
+            onChange={(event) => setAufgabeForm({ ...aufgabeForm, titel: event.target.value })}
+            required
+            autoFocus
+            fullWidth
+            multiline
+            minRows={1}
+            sx={{
+              minWidth: 0,
+              '& .MuiInputBase-inputMultiline': {
+                overflow: 'hidden',
+                overflowWrap: 'anywhere',
+                whiteSpace: 'pre-wrap',
+              },
+            }}
+          />
           <RichTextEditor
             label="Beschreibung"
             value={aufgabeForm.beschreibung}
