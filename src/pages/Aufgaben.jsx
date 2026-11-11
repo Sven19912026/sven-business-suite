@@ -212,6 +212,9 @@ export default function Aufgaben() {
   const [filterKategorie, setFilterKategorie] = useState('Alle')
   const [filterStatus, setFilterStatus] = useState('Offen')
   const [sortierung, setSortierung] = useState('Fälligkeit')
+  const [kalenderMonat, setKalenderMonat] = useState(() => heuteIso().slice(0, 7))
+  const [kalenderTag, setKalenderTag] = useState('')
+  const [rueckmeldungsUebersichtOffen, setRueckmeldungsUebersichtOffen] = useState(true)
   const [heute, setHeute] = useState(() => heuteIso())
   const [bereich, setBereich] = useState(() => {
     const aktuelleUserId = auth.currentUser?.uid
@@ -578,6 +581,30 @@ export default function Aufgaben() {
       })
   }, [bereichAufgaben, filterKategorie, filterStatus, suche])
 
+  const kalenderAnzahlen = useMemo(() => {
+    const anzahl = {}
+    gefilterteAufgaben.forEach((aufgabe) => {
+      if (aufgabe.planungsart !== 'kw' && aufgabe.faelligAm) anzahl[aufgabe.faelligAm] = (anzahl[aufgabe.faelligAm] || 0) + 1
+    })
+    return anzahl
+  }, [gefilterteAufgaben])
+
+  const kalenderTage = useMemo(() => {
+    const [jahr, monat] = kalenderMonat.split('-').map(Number)
+    const offset = (new Date(jahr, monat - 1, 1).getDay() + 6) % 7
+    const anzahl = new Date(jahr, monat, 0).getDate()
+    return Array.from({ length: Math.ceil((offset + anzahl) / 7) * 7 }, (_, index) => {
+      const tag = index - offset + 1
+      return tag < 1 || tag > anzahl ? '' : `${kalenderMonat}-${String(tag).padStart(2, '0')}`
+    })
+  }, [kalenderMonat])
+
+  function kalenderBlaettern(schritt) {
+    const [jahr, monat] = kalenderMonat.split('-').map(Number)
+    const datum = new Date(jahr, monat - 1 + schritt, 1)
+    setKalenderMonat(`${datum.getFullYear()}-${String(datum.getMonth() + 1).padStart(2, '0')}`)
+  }
+
   const prioritaetsGruppen = useMemo(() => PRIORITAETEN
     .map((prioritaet) => {
       const gruppenAufgaben = gefilterteAufgaben
@@ -702,6 +729,35 @@ export default function Aufgaben() {
     }
   }
 
+  const kalenderListenGruppen = [
+    { art: 'tag', name: kalenderTag ? datumsGruppeFormatieren(kalenderTag) : '', passt: (aufgabe) => kalenderTag && aufgabe.planungsart !== 'kw' && aufgabe.faelligAm === kalenderTag },
+    { art: 'ueberfaellig', name: 'Überfällige Aufgaben', passt: (aufgabe) => aufgabe.planungsart !== 'kw' && !aufgabe.erledigt && aufgabe.faelligAm && aufgabe.faelligAm < heute && aufgabe.faelligAm !== kalenderTag },
+    { art: 'kw', name: 'Kalenderwochen', passt: (aufgabe) => aufgabe.planungsart === 'kw' },
+    { art: 'ohne', name: 'Ohne Fälligkeitsdatum', passt: (aufgabe) => aufgabe.planungsart !== 'kw' && !aufgabe.faelligAm },
+  ].flatMap((abschnitt) => prioritaetsGruppen.map((gruppe) => {
+    const passendeAufgaben = gruppe.aufgaben.filter(abschnitt.passt)
+    return {
+      ...gruppe,
+      id: `${abschnitt.art}-${gruppe.id}`,
+      name: `${abschnitt.name} · ${gruppe.name}`,
+      aufgaben: passendeAufgaben,
+      datumsGruppen: gruppe.datumsGruppen.map((datum) => ({
+        ...datum,
+        id: `${abschnitt.art}-${datum.id}`,
+        datum: abschnitt.art === 'tag' ? kalenderTag : datum.datum,
+        istUeberfaelligGruppe: abschnitt.art === 'tag' ? false : datum.istUeberfaelligGruppe,
+        aufgaben: datum.aufgaben.filter(abschnitt.passt),
+      })).filter((datum) => datum.aufgaben.length),
+    }
+  }).filter((gruppe) => gruppe.aufgaben.length))
+
+  const offeneRueckmeldungenGesamt = useMemo(() => bereichAufgaben
+    .filter((aufgabe) => aufgabe.offeneRueckmeldung === true && !aufgabe.erledigt && aufgabe.status !== 'Erledigt')
+    .sort((erste, zweite) => {
+      const datum = planungsSchluessel(erste).localeCompare(planungsSchluessel(zweite))
+      return datum || String(erste.titel || '').localeCompare(String(zweite.titel || ''), 'de')
+    }), [bereichAufgaben])
+
   function neueAufgabe(kategorieId = '', prioritaet = 'Mittel', faelligAm = '') {
     setAufgabeId(null)
     setAufgabeForm({
@@ -755,7 +811,7 @@ export default function Aufgaben() {
   function allePrioritaetenSetzen(offen) {
     setOffenePrioritaeten((vorher) => {
       const naechsterStand = { ...vorher }
-      prioritaetsGruppen.forEach((gruppe) => { naechsterStand[gruppe.id] = offen })
+      kalenderListenGruppen.forEach((gruppe) => { naechsterStand[gruppe.id] = offen })
       return offenePrioritaetenSpeichern(naechsterStand)
     })
   }
@@ -1991,13 +2047,46 @@ export default function Aufgaben() {
         </Stack>
       </Paper>
 
+      <Paper sx={{ p: { xs: 1.5, sm: 2.5 } }}>
+        <Stack direction="row" alignItems="center" justifyContent="space-between" gap={1} flexWrap="wrap" useFlexGap>
+          <Button aria-label="Vorheriger Monat" onClick={() => kalenderBlaettern(-1)}>‹</Button>
+          <Typography variant="h6" fontWeight={800}>{new Date(`${kalenderMonat}-01T12:00:00`).toLocaleDateString('de-DE', { month: 'long', year: 'numeric' })}</Typography>
+          <Button aria-label="Nächster Monat" onClick={() => kalenderBlaettern(1)}>›</Button>
+          <Button onClick={() => { setKalenderMonat(heute.slice(0, 7)); setKalenderTag(heute); setOffenePrioritaeten({}); setOffeneDatumsGruppen({}) }}>Heute</Button>
+        </Stack>
+        <Typography variant="body2" color="text.secondary" sx={{ my: 1 }}>Rot: Aufgaben im aktuellen Filter. Einen Tag anklicken, um seine Aufgaben zu öffnen.</Typography>
+        <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: { xs: 0.5, sm: 1 } }}>
+          {['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'].map((name) => <Typography key={name} textAlign="center" fontWeight={700}>{name}</Typography>)}
+          {kalenderTage.map((datum, index) => datum ? (
+            <Button key={datum}
+              aria-label={`${datumsGruppeFormatieren(datum)}, ${kalenderAnzahlen[datum] || 0} Aufgaben`}
+              aria-pressed={kalenderTag === datum}
+              onClick={() => { setKalenderTag(datum); setOffenePrioritaeten({}); setOffeneDatumsGruppen({}) }}
+              onDragOver={(event) => { if (gezogeneAufgabeId && !sortierungSpeichert) event.preventDefault() }}
+              onDrop={(event) => {
+                const quelle = aufgaben.find((aufgabe) => aufgabe.id === (event.dataTransfer.getData('text/plain') || gezogeneAufgabeId))
+                if (quelle) aufgabeTagesKategorieAendern(event, datum, false, quelle.offeneRueckmeldung === true)
+              }}
+              sx={{ minWidth: 0, minHeight: 58, flexDirection: 'column', border: '2px solid', borderColor: kalenderTag === datum ? 'primary.main' : datum === heute ? 'text.secondary' : 'divider', color: kalenderAnzahlen[datum] ? 'error.main' : 'text.primary', bgcolor: kalenderAnzahlen[datum] ? 'rgba(211,47,47,0.12)' : 'background.paper', '&:hover': { bgcolor: kalenderAnzahlen[datum] ? 'rgba(211,47,47,0.22)' : 'action.hover' } }}>
+              <span>{Number(datum.slice(-2))}</span>
+              {Boolean(kalenderAnzahlen[datum]) && <Typography component="span" variant="caption">{kalenderAnzahlen[datum]}</Typography>}
+            </Button>
+          ) : <Box key={`leer-${index}`} />)}
+        </Box>
+        {kalenderTag && <Stack direction="row" gap={1} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mt: 2 }}>
+          <Typography fontWeight={700}>{datumsGruppeFormatieren(kalenderTag)} · {kalenderAnzahlen[kalenderTag] || 0} Aufgaben</Typography>
+          <Button startIcon={<AddIcon />} onClick={() => neueAufgabe('', 'Mittel', kalenderTag)}>Aufgabe hinzufügen</Button>
+          <Button onClick={() => setKalenderTag('')}>Tagesansicht schließen</Button>
+        </Stack>}
+      </Paper>
+
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'minmax(0, 1fr)', lg: 'minmax(0, 2fr) minmax(280px, 1fr)' }, gap: 3, minWidth: 0 }}>
         <Stack spacing={1.5} sx={{ minWidth: 0 }}>
           <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ sm: 'center' }} gap={1}>
             <Box>
-              <Typography variant="h6" fontWeight={800}>Aufgaben nach Priorität</Typography>
+              <Typography variant="h6" fontWeight={800}>Aufgabenübersicht</Typography>
               <Typography variant="body2" color="text.secondary">
-                Prioritätsgruppen und Fälligkeitstage anklicken, um sie ein- oder auszuklappen. „Offene Rückmeldungen“ sind ebenfalls einklappbar, per Drag & Drop befüllbar und werden unerledigt automatisch auf den nächsten Tag übertragen.
+                Kalendertag anklicken, um dessen Aufgaben anzuzeigen. Überfällige Aufgaben stehen vor den Kalenderwochen. „Offene Rückmeldungen“ sind ebenfalls einklappbar, per Drag & Drop befüllbar und werden unerledigt automatisch auf den nächsten Tag übertragen.
               </Typography>
             </Box>
             {prioritaetsGruppen.length > 1 && (
@@ -2016,7 +2105,7 @@ export default function Aufgaben() {
 
           {!gefilterteAufgaben.length && <Paper sx={{ p: 5, textAlign: 'center' }}><TaskAltIcon color="disabled" sx={{ fontSize: 52 }} /><Typography variant="h6" fontWeight={700} mt={1}>Keine Aufgaben in „{bereichName}“ gefunden</Typography></Paper>}
 
-          {prioritaetsGruppen.map((gruppe) => {
+          {kalenderListenGruppen.map((gruppe) => {
             const istOffen = offenePrioritaeten[gruppe.id] !== false
             return (
               <Paper key={gruppe.id} variant="outlined" sx={{ overflow: 'hidden' }}>
@@ -2265,6 +2354,26 @@ export default function Aufgaben() {
               </Paper>
             )
           })}
+          <Paper variant="outlined" sx={{ overflow: 'hidden' }}>
+            <Button
+              fullWidth
+              aria-expanded={rueckmeldungsUebersichtOffen}
+              onClick={() => setRueckmeldungsUebersichtOffen((offen) => !offen)}
+              endIcon={rueckmeldungsUebersichtOffen ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+              sx={{ p: 2, justifyContent: 'space-between', textTransform: 'none' }}
+            >
+              <Typography component="span" fontWeight={800}>Alle offenen Rückmeldungen · {offeneRueckmeldungenGesamt.length}</Typography>
+            </Button>
+            <Collapse in={rueckmeldungsUebersichtOffen} timeout="auto">
+              <Stack spacing={1.25} sx={{ p: 2, pt: 0 }}>
+                <Typography variant="body2" color="text.secondary">
+                  Alle offenen Rückmeldungen in „{bereichName}“, unabhängig von Tagesauswahl, Suche und Filtern. Die Einträge bleiben zusätzlich beim jeweiligen Tag oder der Kalenderwoche sichtbar.
+                </Typography>
+                {!offeneRueckmeldungenGesamt.length && <Typography color="text.secondary">Keine offenen Rückmeldungen vorhanden.</Typography>}
+                {offeneRueckmeldungenGesamt.map((aufgabe) => aufgabeKarte(aufgabe))}
+              </Stack>
+            </Collapse>
+          </Paper>
         </Stack>
 
         <Paper sx={{ p: 2.5, alignSelf: 'start' }}>
