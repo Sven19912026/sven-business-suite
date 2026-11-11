@@ -70,12 +70,35 @@ const LEERE_AUFGABE = {
   prioritaet: 'Mittel',
   status: 'Offen',
   faelligAm: '',
+  planungsart: 'tag',
+  kalenderwoche: '',
+  kalenderjahr: '',
   wiederholung: 'Keine',
   erledigt: false,
   bereich: '',
   offeneRueckmeldung: false,
   rahmenfarbe: '',
   unteraufgaben: [],
+}
+
+
+function planungsSchluessel(aufgabe) {
+  return aufgabe.planungsart === 'kw'
+    ? `KW:${aufgabe.kalenderjahr}:${String(aufgabe.kalenderwoche).padStart(2, '0')}`
+    : (aufgabe.faelligAm || '')
+}
+
+function planungAusSchluessel(value) {
+  if (!value.startsWith('KW:')) return { planungsart: 'tag', faelligAm: value, kalenderjahr: null, kalenderwoche: null }
+  const [, jahr, woche] = value.split(':')
+  return { planungsart: 'kw', faelligAm: '', kalenderjahr: Number(jahr), kalenderwoche: Number(woche) }
+}
+
+function kwGueltig(jahr, woche) {
+  if (!Number.isInteger(jahr) || jahr < 1900 || jahr > 9999 || !Number.isInteger(woche) || woche < 1 || woche > 53) return false
+  const tag = new Date(Date.UTC(jahr, 0, 1)).getUTCDay()
+  const schaltjahr = jahr % 4 === 0 && (jahr % 100 !== 0 || jahr % 400 === 0)
+  return woche <= 52 || tag === 4 || (tag === 3 && schaltjahr)
 }
 
 function heuteIso() {
@@ -93,6 +116,7 @@ function datumFormatieren(value) {
 }
 
 function datumsGruppeFormatieren(value) {
+  if (value?.startsWith('KW:')) { const [, jahr, woche] = value.split(':'); return `KW ${Number(woche)} / ${jahr}` }
   if (!value) return 'Ohne Fälligkeitsdatum'
   const datum = new Date(`${value}T00:00:00`)
   return Number.isNaN(datum.getTime())
@@ -545,6 +569,7 @@ export default function Aufgaben() {
           .join(' ')
         return [
           item.titel,
+          datumsGruppeFormatieren(planungsSchluessel(item)),
           richTextToPlainText(item.beschreibung),
           richTextToPlainText(item.notizen),
           item.verantwortlich,
@@ -576,8 +601,8 @@ export default function Aufgaben() {
 
       const datumsGruppenMap = new Map()
       gruppenAufgaben.forEach((aufgabe) => {
-        const datum = aufgabe.faelligAm || ''
-        const istUeberfaellig = Boolean(!aufgabe.erledigt && datum && datum < heute)
+        const datum = planungsSchluessel(aufgabe)
+        const istUeberfaellig = Boolean(aufgabe.planungsart !== 'kw' && !aufgabe.erledigt && datum && datum < heute)
         const schluessel = istUeberfaellig ? 'ueberfaellig' : (datum || 'ohne-faelligkeit')
         if (!datumsGruppenMap.has(schluessel)) {
           datumsGruppenMap.set(schluessel, {
@@ -684,7 +709,7 @@ export default function Aufgaben() {
       bereich,
       kategorieId: kategorieId || standardKategorie?.id || sortierteKategorien[0]?.id || '',
       prioritaet,
-      faelligAm,
+      ...planungAusSchluessel(faelligAm),
     })
     setAufgabeDialog(true)
   }
@@ -775,7 +800,7 @@ export default function Aufgaben() {
     if (
       !quelle
       || (quelle.prioritaet || 'Mittel') !== (zielAufgabe.prioritaet || 'Mittel')
-      || (quelle.faelligAm || '') !== (zielAufgabe.faelligAm || '')
+      || planungsSchluessel(quelle) !== planungsSchluessel(zielAufgabe)
       || (quelle.offeneRueckmeldung === true) !== (zielAufgabe.offeneRueckmeldung === true)
     ) return
     event.preventDefault()
@@ -790,6 +815,12 @@ export default function Aufgaben() {
 
   async function aufgabeAblegen(event, zielAufgabe) {
     event.preventDefault()
+    event.stopPropagation()
+    const quelle = aufgaben.find((aufgabe) => aufgabe.id === (event.dataTransfer.getData('text/plain') || gezogeneAufgabeId))
+    if (quelle && planungsSchluessel(quelle) !== planungsSchluessel(zielAufgabe) && !sortierungSpeichert) {
+      await aufgabeTagesKategorieAendern(event, planungsSchluessel(zielAufgabe), false, zielAufgabe.offeneRueckmeldung === true)
+      return
+    }
     if (!manuelleSortierung || sortierungSpeichert) {
       dragBeenden()
       return
@@ -804,7 +835,7 @@ export default function Aufgaben() {
     const prioritaet = quellAufgabe.prioritaet || 'Mittel'
     if (
       prioritaet !== (zielAufgabe.prioritaet || 'Mittel')
-      || (quellAufgabe.faelligAm || '') !== (zielAufgabe.faelligAm || '')
+      || planungsSchluessel(quellAufgabe) !== planungsSchluessel(zielAufgabe)
       || (quellAufgabe.offeneRueckmeldung === true) !== (zielAufgabe.offeneRueckmeldung === true)
     ) {
       setFehler('Aufgaben können nur innerhalb derselben Priorität, desselben Fälligkeitstags und derselben Tageskategorie sortiert werden.')
@@ -819,7 +850,7 @@ export default function Aufgaben() {
     }
 
     const sichtbareIds = sichtbareGruppe.aufgaben
-      .filter((aufgabe) => (aufgabe.faelligAm || '') === (quellAufgabe.faelligAm || ''))
+      .filter((aufgabe) => planungsSchluessel(aufgabe) === planungsSchluessel(quellAufgabe))
       .filter((aufgabe) => (aufgabe.offeneRueckmeldung === true) === (quellAufgabe.offeneRueckmeldung === true))
       .map((aufgabe) => aufgabe.id)
     const quellIndex = sichtbareIds.indexOf(quellAufgabe.id)
@@ -835,7 +866,7 @@ export default function Aufgaben() {
 
     const vollstaendigeGruppe = [...bereichAufgaben]
       .filter((aufgabe) => (aufgabe.prioritaet || 'Mittel') === prioritaet)
-      .filter((aufgabe) => (aufgabe.faelligAm || '') === (quellAufgabe.faelligAm || ''))
+      .filter((aufgabe) => planungsSchluessel(aufgabe) === planungsSchluessel(quellAufgabe))
       .filter((aufgabe) => (aufgabe.offeneRueckmeldung === true) === (quellAufgabe.offeneRueckmeldung === true))
       .sort((a, b) => {
         const aWert = Number.isFinite(Number(a.manuelleReihenfolge)) ? Number(a.manuelleReihenfolge) : Number.MAX_SAFE_INTEGER
@@ -891,15 +922,11 @@ export default function Aufgaben() {
     )
     const gleicherTag = zielIstUeberfaellig
       ? istQuelleUeberfaellig
-      : (quellAufgabe.faelligAm || '') === (zielDatum || '')
+      : planungsSchluessel(quellAufgabe) === (zielDatum || '')
 
-    if (!gleicherTag) {
-      setFehler('Die Tageskategorie kann nur innerhalb desselben Fälligkeitstags geändert werden.')
-      dragBeenden()
-      return
-    }
+    if (!gleicherTag && zielIstUeberfaellig) { dragBeenden(); return }
 
-    if ((quellAufgabe.offeneRueckmeldung === true) === offeneRueckmeldung) {
+    if (gleicherTag && (quellAufgabe.offeneRueckmeldung === true) === offeneRueckmeldung) {
       dragBeenden()
       return
     }
@@ -908,6 +935,7 @@ export default function Aufgaben() {
     setFehler('')
     try {
       await updateDoc(doc(db, 'suiteAufgaben', quellAufgabe.id), {
+        ...(!gleicherTag ? planungAusSchluessel(zielDatum || '') : {}),
         offeneRueckmeldung,
         aktualisiertAm: serverTimestamp(),
       })
@@ -934,6 +962,10 @@ export default function Aufgaben() {
 
   async function aufgabeSpeichern() {
     if (!user || !aufgabeForm.titel.trim() || !aufgabeForm.kategorieId) return
+    if (aufgabeForm.planungsart === 'kw' && !kwGueltig(Number(aufgabeForm.kalenderjahr), Number(aufgabeForm.kalenderwoche))) {
+      setFehler('Bitte ein gültiges Kalenderjahr und eine gültige ISO-Kalenderwoche eingeben.')
+      return
+    }
     setSpeichert(true)
     setFehler('')
     try {
@@ -951,6 +983,7 @@ export default function Aufgaben() {
           : naechsteManuelleReihenfolge(prioritaet, aufgabenBereich, aufgabeId || ''))
       const daten = {
         ...aufgabeForm,
+        ...planungAusSchluessel(planungsSchluessel(aufgabeForm)),
         prioritaet,
         manuelleReihenfolge,
         bereich: aufgabeForm.bereich || bereich,
@@ -978,7 +1011,7 @@ export default function Aufgaben() {
     setFehler('')
     try {
       await updateDoc(doc(db, 'suiteAufgaben', aufgabe.id), {
-        faelligAm,
+        ...planungAusSchluessel(faelligAm),
         aktualisiertAm: serverTimestamp(),
       })
     } catch (error) {
@@ -1736,7 +1769,7 @@ export default function Aufgaben() {
                                             </Stack>
                                           </Box>
                                           <Stack direction="row" gap={0.75} flexWrap="wrap" useFlexGap>
-                                            <Chip size="small" variant="outlined" label={`Fällig: ${datumFormatieren(aufgabe.faelligAm)}`} sx={{ maxWidth: '100%', height: 'auto', '& .MuiChip-label': { whiteSpace: 'normal', py: 0.35, overflowWrap: 'anywhere' } }} />
+                                            <Chip size="small" variant="outlined" label={aufgabe.planungsart === 'kw' ? datumsGruppeFormatieren(planungsSchluessel(aufgabe)) : `Fällig: ${datumFormatieren(aufgabe.faelligAm)}`} sx={{ maxWidth: '100%', height: 'auto', '& .MuiChip-label': { whiteSpace: 'normal', py: 0.35, overflowWrap: 'anywhere' } }} />
                                             {aufgabe.verantwortlich && <Chip size="small" variant="outlined" label={`Verantwortlich: ${aufgabe.verantwortlich}`} sx={{ maxWidth: '100%', height: 'auto', '& .MuiChip-label': { whiteSpace: 'normal', py: 0.35, overflowWrap: 'anywhere' } }} />}
                                             {aufgabe.wiederholung && aufgabe.wiederholung !== 'Keine' && <Chip size="small" variant="outlined" label={`Wiederholung: ${aufgabe.wiederholung}`} sx={{ maxWidth: '100%', height: 'auto', '& .MuiChip-label': { whiteSpace: 'normal', py: 0.35, overflowWrap: 'anywhere' } }} />}
                                           </Stack>
@@ -2090,7 +2123,7 @@ export default function Aufgaben() {
                                 <Typography variant="body2" color="text.secondary">
                                   {gruppeIstUeberfaellig
                                     ? `${datumsGruppe.aufgaben.length} überfällige Aufgabe${datumsGruppe.aufgaben.length === 1 ? '' : 'n'}`
-                                    : `${datumsGruppe.aufgaben.length} Aufgabe${datumsGruppe.aufgaben.length === 1 ? '' : 'n'} an diesem Tag`}
+                                    : `${datumsGruppe.aufgaben.length} Aufgabe${datumsGruppe.aufgaben.length === 1 ? '' : 'n'} ${datumsGruppe.datum.startsWith('KW:') ? 'in dieser Kalenderwoche' : 'an diesem Tag'}`}
                                 </Typography>
                                 {gruppeIstHeute && <Chip size="small" color="warning" label="Heute" />}
                                 {gruppeIstUeberfaellig && <Chip size="small" color="error" label="Überfällig" />}
@@ -2338,7 +2371,14 @@ export default function Aufgaben() {
             <TextField select fullWidth label="Priorität" value={aufgabeForm.prioritaet} onChange={(e) => setAufgabeForm({ ...aufgabeForm, prioritaet: e.target.value })}>{['Hoch', 'Mittel', 'Niedrig'].map((wert) => <MenuItem key={wert} value={wert}>{wert}</MenuItem>)}</TextField>
           </Stack>
           <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
-            <TextField fullWidth label="Fällig am" type="date" InputLabelProps={{ shrink: true }} value={aufgabeForm.faelligAm} onChange={(e) => setAufgabeForm({ ...aufgabeForm, faelligAm: e.target.value })} />
+            <TextField select fullWidth label="Planungsart" value={aufgabeForm.planungsart || 'tag'} onChange={(event) => setAufgabeForm({ ...aufgabeForm, planungsart: event.target.value, kalenderjahr: aufgabeForm.kalenderjahr || new Date().getFullYear() })}>
+              <MenuItem value="tag">Konkreter Tag</MenuItem>
+              <MenuItem value="kw">Kalenderwoche (ohne festen Tag)</MenuItem>
+            </TextField>
+            {aufgabeForm.planungsart === 'kw' ? <Stack direction="row" spacing={2}>
+              <TextField fullWidth label="Kalenderjahr" type="number" value={aufgabeForm.kalenderjahr || ''} onChange={(event) => setAufgabeForm({ ...aufgabeForm, kalenderjahr: event.target.value })} />
+              <TextField fullWidth label="Kalenderwoche" type="number" inputProps={{ min: 1, max: 53 }} value={aufgabeForm.kalenderwoche || ''} onChange={(event) => setAufgabeForm({ ...aufgabeForm, kalenderwoche: event.target.value })} />
+            </Stack> : <TextField fullWidth label="Fällig am" type="date" InputLabelProps={{ shrink: true }} value={aufgabeForm.faelligAm} onChange={(e) => setAufgabeForm({ ...aufgabeForm, faelligAm: e.target.value })} />}
             <TextField select fullWidth label="Wiederholung" value={aufgabeForm.wiederholung} onChange={(e) => setAufgabeForm({ ...aufgabeForm, wiederholung: e.target.value })}>{['Keine', 'Täglich', 'Wöchentlich', 'Monatlich', 'Jährlich'].map((wert) => <MenuItem key={wert} value={wert}>{wert}</MenuItem>)}</TextField>
           </Stack>
           <FormControlLabel
