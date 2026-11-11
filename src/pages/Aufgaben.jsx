@@ -267,20 +267,6 @@ export default function Aufgaben() {
       return {}
     }
   })
-  const [offenePrioritaeten, setOffenePrioritaeten] = useState(() => {
-    const aktuelleUserId = auth.currentUser?.uid
-    if (!aktuelleUserId) return {}
-
-    try {
-      const gespeichert = JSON.parse(
-        localStorage.getItem(`sven-suite-aufgaben-prioritaeten-${aktuelleUserId}`) || '{}',
-      )
-      return gespeichert && typeof gespeichert === 'object' ? gespeichert : {}
-    } catch (error) {
-      console.warn('Gespeicherter Prioritäten-Zustand konnte nicht gelesen werden.', error)
-      return {}
-    }
-  })
   const [manuelleSortierung, setManuelleSortierung] = useState(() => {
     const aktuelleUserId = auth.currentUser?.uid
     if (!aktuelleUserId) return false
@@ -511,7 +497,6 @@ export default function Aufgaben() {
   }, [bereichKategorien, bereich, user?.uid])
   const standardKategorie = bereichKategorien.find((item) => item.id === `allgemein-${user?.uid}-${bereich}`)
     || bereichKategorien.find((item) => String(item.name || '').trim().toLocaleLowerCase('de-DE') === STANDARD_KATEGORIE.toLocaleLowerCase('de-DE'))
-  const offenePrioritaetenSchluessel = user ? `sven-suite-aufgaben-prioritaeten-${user.uid}` : ''
   const offeneDatumsGruppenSchluessel = user ? `sven-suite-aufgaben-datumsgruppen-${user.uid}` : ''
   const offeneRueckmeldungsGruppenSchluessel = user ? `sven-suite-aufgaben-rueckmeldungsgruppen-${user.uid}` : ''
   const manuelleSortierungSchluessel = user ? `sven-suite-aufgaben-manuell-${user.uid}` : ''
@@ -782,13 +767,6 @@ export default function Aufgaben() {
     setAufgabeDialog(true)
   }
 
-  function offenePrioritaetenSpeichern(naechsterStand) {
-    if (offenePrioritaetenSchluessel) {
-      localStorage.setItem(offenePrioritaetenSchluessel, JSON.stringify(naechsterStand))
-    }
-    return naechsterStand
-  }
-
   function datumsGruppeUmschalten(id, standardOffen = true) {
     setOffeneDatumsGruppen((vorher) => {
       const hatGespeichertenStand = Object.prototype.hasOwnProperty.call(vorher, id)
@@ -810,21 +788,6 @@ export default function Aufgaben() {
         localStorage.setItem(offeneRueckmeldungsGruppenSchluessel, JSON.stringify(naechsterStand))
       }
       return naechsterStand
-    })
-  }
-
-  function prioritaetUmschalten(id) {
-    setOffenePrioritaeten((vorher) => offenePrioritaetenSpeichern({
-      ...vorher,
-      [id]: vorher[id] === false,
-    }))
-  }
-
-  function allePrioritaetenSetzen(offen) {
-    setOffenePrioritaeten((vorher) => {
-      const naechsterStand = { ...vorher }
-      kalenderListenGruppen.forEach((gruppe) => { naechsterStand[gruppe.id] = offen })
-      return offenePrioritaetenSpeichern(naechsterStand)
     })
   }
 
@@ -2066,7 +2029,7 @@ export default function Aufgaben() {
           <Button aria-label="Vorheriger Monat" onClick={() => kalenderBlaettern(-1)}>‹</Button>
           <Typography variant="h6" fontWeight={800}>{new Date(`${kalenderMonat}-01T12:00:00`).toLocaleDateString('de-DE', { month: 'long', year: 'numeric' })}</Typography>
           <Button aria-label="Nächster Monat" onClick={() => kalenderBlaettern(1)}>›</Button>
-          <Button onClick={() => { setKalenderMonat(heute.slice(0, 7)); setKalenderTag(heute); setOffenePrioritaeten({}); setOffeneDatumsGruppen({}) }}>Heute</Button>
+          <Button onClick={() => { setKalenderMonat(heute.slice(0, 7)); setKalenderTag(heute); setOffeneDatumsGruppen({}) }}>Heute</Button>
         </Stack>
         <Typography variant="body2" color="text.secondary" sx={{ my: 1 }}>Rot: Aufgaben im aktuellen Filter. Einen Tag anklicken, um seine Aufgaben zu öffnen.</Typography>
         <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: { xs: 0.5, sm: 1 } }}>
@@ -2075,7 +2038,7 @@ export default function Aufgaben() {
             <Button key={datum}
               aria-label={`${datumsGruppeFormatieren(datum)}, ${kalenderAnzahlen[datum] || 0} Aufgaben`}
               aria-pressed={kalenderTag === datum}
-              onClick={() => { setKalenderTag(datum); setOffenePrioritaeten({}); setOffeneDatumsGruppen({}) }}
+              onClick={() => { setKalenderTag(datum); setOffeneDatumsGruppen({}) }}
               onDragOver={(event) => { if (gezogeneAufgabeId && !sortierungSpeichert) event.preventDefault() }}
               onDrop={(event) => {
                 const quelle = aufgaben.find((aufgabe) => aufgabe.id === (event.dataTransfer.getData('text/plain') || gezogeneAufgabeId))
