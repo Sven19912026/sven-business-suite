@@ -751,6 +751,18 @@ export default function Aufgaben() {
     }
   }).filter((gruppe) => gruppe.aufgaben.length))
 
+  const kalenderDatumsGruppen = useMemo(() => {
+    const gruppen = new Map()
+    kalenderListenGruppen.forEach((gruppe) => gruppe.datumsGruppen.forEach((datum) => {
+      const art = datum.istUeberfaelligGruppe ? 'ueberfaellig' : datum.datum.startsWith('KW:') ? 'kw' : datum.datum ? 'tag' : 'ohne'
+      const id = `${art}-${datum.datum}`
+      if (!gruppen.has(id)) gruppen.set(id, { ...datum, id, art, aufgaben: [] })
+      gruppen.get(id).aufgaben.push(...datum.aufgaben)
+    }))
+    const rang = { tag: 0, kw: 1, ueberfaellig: 2, ohne: 3 }
+    return [...gruppen.values()].sort((erste, zweite) => rang[erste.art] - rang[zweite.art] || erste.datum.localeCompare(zweite.datum))
+  }, [kalenderListenGruppen])
+
   const offeneRueckmeldungenGesamt = useMemo(() => bereichAufgaben
     .filter((aufgabe) => aufgabe.offeneRueckmeldung === true && !aufgabe.erledigt && aufgabe.status !== 'Erledigt')
     .sort((erste, zweite) => {
@@ -873,7 +885,8 @@ export default function Aufgaben() {
     event.preventDefault()
     event.stopPropagation()
     const quelle = aufgaben.find((aufgabe) => aufgabe.id === (event.dataTransfer.getData('text/plain') || gezogeneAufgabeId))
-    if (quelle && planungsSchluessel(quelle) !== planungsSchluessel(zielAufgabe) && !sortierungSpeichert) {
+    if (quelle && (planungsSchluessel(quelle) !== planungsSchluessel(zielAufgabe)
+      || (quelle.offeneRueckmeldung === true) !== (zielAufgabe.offeneRueckmeldung === true)) && !sortierungSpeichert) {
       await aufgabeTagesKategorieAendern(event, planungsSchluessel(zielAufgabe), false, zielAufgabe.offeneRueckmeldung === true)
       return
     }
@@ -963,6 +976,7 @@ export default function Aufgaben() {
   async function aufgabeTagesKategorieAendern(event, zielDatum, zielIstUeberfaellig, offeneRueckmeldung) {
     event.preventDefault()
     event.stopPropagation()
+    if (!user || sortierungSpeichert) return
 
     const quellId = event.dataTransfer.getData('text/plain') || gezogeneAufgabeId
     const quellAufgabe = aufgaben.find((aufgabe) => aufgabe.id === quellId)
@@ -2080,19 +2094,54 @@ export default function Aufgaben() {
         </Stack>}
       </Paper>
 
+          <Paper variant="outlined" sx={{ overflow: 'hidden' }}>
+            <Button
+              fullWidth
+              aria-expanded={rueckmeldungsUebersichtOffen}
+              onClick={() => setRueckmeldungsUebersichtOffen((offen) => !offen)}
+              endIcon={rueckmeldungsUebersichtOffen ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+              sx={{ p: 2, justifyContent: 'space-between', textTransform: 'none' }}
+            >
+              <Typography component="span" fontWeight={800}>Alle offenen Rückmeldungen · {offeneRueckmeldungenGesamt.length}</Typography>
+            </Button>
+            <Box
+              onDragOver={(event) => {
+                if (!gezogeneAufgabeId || sortierungSpeichert) return
+                event.preventDefault()
+                event.dataTransfer.dropEffect = 'move'
+              }}
+              onDrop={(event) => {
+                const quelle = aufgaben.find((aufgabe) => aufgabe.id === (event.dataTransfer.getData('text/plain') || gezogeneAufgabeId))
+                if (quelle) aufgabeTagesKategorieAendern(event, planungsSchluessel(quelle), false, true)
+              }}
+              sx={{ mx: 2, mb: 2, p: 1.5, border: '2px dashed', borderColor: 'info.main', borderRadius: 1, bgcolor: gezogeneAufgabeId ? 'action.hover' : 'background.default' }}
+            >
+              <Typography variant="body2">Aufgabe aus einer KW oder einem Tag hierher ziehen → offene Rückmeldung. Die bisherige Planung bleibt erhalten.</Typography>
+            </Box>
+            <Collapse in={rueckmeldungsUebersichtOffen} timeout="auto">
+              <Stack spacing={1.25} sx={{ p: 2, pt: 0 }}>
+                <Typography variant="body2" color="text.secondary">
+                  Alle offenen Rückmeldungen in „{bereichName}“, unabhängig von Tagesauswahl, Suche und Filtern. Die Einträge bleiben zusätzlich beim jeweiligen Tag oder der Kalenderwoche sichtbar.
+                </Typography>
+                {!offeneRueckmeldungenGesamt.length && <Typography color="text.secondary">Keine offenen Rückmeldungen vorhanden.</Typography>}
+                {offeneRueckmeldungenGesamt.map((aufgabe) => aufgabeKarte(aufgabe))}
+              </Stack>
+            </Collapse>
+          </Paper>
+
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'minmax(0, 1fr)', lg: 'minmax(0, 2fr) minmax(280px, 1fr)' }, gap: 3, minWidth: 0 }}>
         <Stack spacing={1.5} sx={{ minWidth: 0 }}>
           <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ sm: 'center' }} gap={1}>
             <Box>
               <Typography variant="h6" fontWeight={800}>Aufgabenübersicht</Typography>
               <Typography variant="body2" color="text.secondary">
-                Kalendertag anklicken, um dessen Aufgaben anzuzeigen. Überfällige Aufgaben stehen vor den Kalenderwochen. „Offene Rückmeldungen“ sind ebenfalls einklappbar, per Drag & Drop befüllbar und werden unerledigt automatisch auf den nächsten Tag übertragen.
+                Kalendertag anklicken, um dessen Aufgaben anzuzeigen. Kalenderwochen stehen direkt darunter; überfällige Aufgaben und Aufgaben ohne Datum am Ende. „Offene Rückmeldungen“ sind ebenfalls einklappbar, per Drag & Drop befüllbar und werden unerledigt automatisch auf den nächsten Tag übertragen.
               </Typography>
             </Box>
-            {prioritaetsGruppen.length > 1 && (
+            {kalenderDatumsGruppen.length > 1 && (
               <Stack direction="row" gap={0.5}>
-                <Button size="small" onClick={() => allePrioritaetenSetzen(true)}>Alle öffnen</Button>
-                <Button size="small" onClick={() => allePrioritaetenSetzen(false)}>Alle schließen</Button>
+                <Button size="small" onClick={() => setOffeneDatumsGruppen(Object.fromEntries(kalenderDatumsGruppen.map((gruppe) => [gruppe.id, true])))}>Alle öffnen</Button>
+                <Button size="small" onClick={() => setOffeneDatumsGruppen(Object.fromEntries(kalenderDatumsGruppen.map((gruppe) => [gruppe.id, false])))}>Alle schließen</Button>
               </Stack>
             )}
           </Stack>
@@ -2105,61 +2154,7 @@ export default function Aufgaben() {
 
           {!gefilterteAufgaben.length && <Paper sx={{ p: 5, textAlign: 'center' }}><TaskAltIcon color="disabled" sx={{ fontSize: 52 }} /><Typography variant="h6" fontWeight={700} mt={1}>Keine Aufgaben in „{bereichName}“ gefunden</Typography></Paper>}
 
-          {kalenderListenGruppen.map((gruppe) => {
-            const istOffen = offenePrioritaeten[gruppe.id] !== false
-            return (
-              <Paper key={gruppe.id} variant="outlined" sx={{ overflow: 'hidden' }}>
-                <Stack
-                  direction="row"
-                  alignItems="center"
-                  gap={1}
-                  role="button"
-                  tabIndex={0}
-                  aria-expanded={istOffen}
-                  onClick={() => prioritaetUmschalten(gruppe.id)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' || event.key === ' ') {
-                      event.preventDefault()
-                      prioritaetUmschalten(gruppe.id)
-                    }
-                  }}
-                  sx={{
-                    p: 1.5,
-                    cursor: 'pointer',
-                    bgcolor: 'action.hover',
-                    '&:hover': { bgcolor: 'action.selected' },
-                  }}
-                >
-                  <IconButton size="small" tabIndex={-1} aria-label={istOffen ? 'Prioritätsgruppe schließen' : 'Prioritätsgruppe öffnen'}>
-                    {istOffen ? <ExpandLessIcon /> : <ExpandMoreIcon />}
-                  </IconButton>
-                  <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-                    <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
-                      <Typography fontWeight={850}>{gruppe.name}</Typography>
-                      <Chip size="small" color={prioritaetsFarbe(gruppe.prioritaet)} label={gruppe.prioritaet} />
-                    </Stack>
-                    <Typography variant="body2" color="text.secondary">
-                      {gruppe.aufgaben.length} Aufgabe{gruppe.aufgaben.length === 1 ? '' : 'n'} im aktuellen Filter
-                    </Typography>
-                  </Box>
-                  <Chip size="small" label={gruppe.aufgaben.length} color={istOffen ? 'primary' : 'default'} />
-                  <Tooltip title={`Neue Aufgabe mit Priorität „${gruppe.prioritaet}“`}>
-                    <IconButton
-                      size="small"
-                      color="primary"
-                      onClick={(event) => {
-                        event.stopPropagation()
-                        neueAufgabe('', gruppe.prioritaet)
-                      }}
-                    >
-                      <AddIcon fontSize="small" />
-                    </IconButton>
-                  </Tooltip>
-                </Stack>
-
-                <Collapse in={istOffen} timeout="auto" unmountOnExit>
-                  <Stack spacing={1.25} sx={{ p: 1.5, pt: 1.25 }}>
-                    {gruppe.datumsGruppen.map((datumsGruppe) => {
+          {kalenderDatumsGruppen.map((datumsGruppe) => {
                       const hatGespeichertenStand = Object.prototype.hasOwnProperty.call(offeneDatumsGruppen, datumsGruppe.id)
                       const standardOffen = !datumsGruppe.istUeberfaelligGruppe
                       const datumsGruppeIstOffen = hatGespeichertenStand
@@ -2228,7 +2223,7 @@ export default function Aufgaben() {
                                 onKeyDown={(event) => event.stopPropagation()}
                                 onClick={(event) => {
                                   event.stopPropagation()
-                                  neueAufgabe('', gruppe.prioritaet, gruppeIstUeberfaellig ? heute : datumsGruppe.datum)
+                                  neueAufgabe('', 'Mittel', gruppeIstUeberfaellig ? heute : datumsGruppe.datum)
                                 }}
                                 sx={{ flexShrink: 0 }}
                               >
@@ -2237,6 +2232,20 @@ export default function Aufgaben() {
                             </Tooltip>
                           </Stack>
 
+                          {datumsGruppe.datum.startsWith('KW:') && (
+                            <Box
+                              onDragOver={(event) => {
+                                if (!gezogeneAufgabeId || sortierungSpeichert) return
+                                event.preventDefault()
+                                event.stopPropagation()
+                                event.dataTransfer.dropEffect = 'move'
+                              }}
+                              onDrop={(event) => aufgabeTagesKategorieAendern(event, datumsGruppe.datum, false, true)}
+                              sx={{ mx: 1.25, mb: 1.25, p: 1.25, border: '2px dashed', borderColor: 'info.main', borderRadius: 1, bgcolor: gezogeneAufgabeId ? 'action.hover' : 'background.default' }}
+                            >
+                              <Typography variant="body2" color="info.main">Offene Rückmeldung · Aufgabe hierher ziehen</Typography>
+                            </Box>
+                          )}
                           <Collapse in={datumsGruppeIstOffen} timeout="auto" unmountOnExit>
                             <Stack spacing={1.25} sx={{ p: { xs: 1, sm: 1.25 }, pt: 1.25 }}>
                               {[
@@ -2348,32 +2357,8 @@ export default function Aufgaben() {
                           </Collapse>
                         </Paper>
                       )
-                    })}
-                  </Stack>
-                </Collapse>
-              </Paper>
-            )
           })}
-          <Paper variant="outlined" sx={{ overflow: 'hidden' }}>
-            <Button
-              fullWidth
-              aria-expanded={rueckmeldungsUebersichtOffen}
-              onClick={() => setRueckmeldungsUebersichtOffen((offen) => !offen)}
-              endIcon={rueckmeldungsUebersichtOffen ? <ExpandLessIcon /> : <ExpandMoreIcon />}
-              sx={{ p: 2, justifyContent: 'space-between', textTransform: 'none' }}
-            >
-              <Typography component="span" fontWeight={800}>Alle offenen Rückmeldungen · {offeneRueckmeldungenGesamt.length}</Typography>
-            </Button>
-            <Collapse in={rueckmeldungsUebersichtOffen} timeout="auto">
-              <Stack spacing={1.25} sx={{ p: 2, pt: 0 }}>
-                <Typography variant="body2" color="text.secondary">
-                  Alle offenen Rückmeldungen in „{bereichName}“, unabhängig von Tagesauswahl, Suche und Filtern. Die Einträge bleiben zusätzlich beim jeweiligen Tag oder der Kalenderwoche sichtbar.
-                </Typography>
-                {!offeneRueckmeldungenGesamt.length && <Typography color="text.secondary">Keine offenen Rückmeldungen vorhanden.</Typography>}
-                {offeneRueckmeldungenGesamt.map((aufgabe) => aufgabeKarte(aufgabe))}
-              </Stack>
-            </Collapse>
-          </Paper>
+
         </Stack>
 
         <Paper sx={{ p: 2.5, alignSelf: 'start' }}>
